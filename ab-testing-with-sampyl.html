@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>A/B Testing with Sampyl &mdash; Matatat.org</title>
+  <meta name="author" content="Mat Leonard">
+
+
+
+
+
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+
+    <link href="/favicon.png" rel="icon">
+
+  <link href="/theme/css/main.css" media="screen, projection"
+        rel="stylesheet" type="text/css">
+
+  <link href="//fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+  <link href="//fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+</head>
+
+<body>
+  <header role="banner"><hgroup>
+  <h1><a href="/">Matatat.org</a></h1>
+</hgroup></header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+</ul>
+
+
+<ul class="main-navigation">
+    <li><a href="/archives.html">Archives</a></li>
+      <li><a href="/pages/about.html">About</a></li>
+</ul></nav>
+  <div id="main">
+    <div id="content">
+<div>
+  <article class="hentry" role="article">
+<header>
+      <h1 class="entry-title">A/B Testing with Sampyl</h1>
+    <p class="meta">
+<time datetime="2016-01-31T01:18:00-08:00" pubdate>Jan 31, 2016</time>    </p>
+</header>
+
+  <div class="entry-content"><p>I've been working on building a Bayesian model to infer the firing rate of neurons over time. Python has a few packages available which use <a href="https://en.wikipedia.org/wiki/Markov_chain_Monte_Carlo">Markov Chain Monte Carlo</a> (MCMC) methods to sample from the posterior distribution of a Bayesian model. The one I'm most familiar with is <a href="https://github.com/pymc-devs/pymc3">PyMC</a>, the newest version (PyMC3) implements the <a href="http://arxiv.org/abs/1111.4246">No-U-Turn Sampler</a> (NUTS) developed by Matthew Hoffman and Andrew Gelman. NUTS is based on Hamiltonian MCMC which uses the gradient of the posterior log probability to avoid the random walk nature of Metropolis-Hastings samplers, but requires very little tuning by the user. In the new version, the authors of PyMC chose to use <a href="http://deeplearning.net/software/theano/">Theano</a> to calculate the log-p gradients. This is where I ran into problems.</p>
+<p>Theano requires a very non-Pythonic semantic and syntactic style to build models. Something that would have taken me minutes writing normal Python, took me hours trying to get it to work with Theano. A bit later I was discussing my issues with my friend Andy when he suggested there should be a sampler implementation where you can simply pass a normal Python function calculating <span class="math">\(\log P(\theta)\)</span> into the samplers.</p>
+<p>After a couple hours thinking up the name, I started writing <a href="https://github.com/mcleonard/sampyl">Sampyl</a>, a new package implementing MCMC samplers. The main feature is that each sampler takes a <span class="math">\(\log P(\theta)\)</span> function for whatever distribution you want to draw from. It uses <a href="https://github.com/HIPS/autograd">Autograd</a> for automatic gradient calculations, but it is not required. I have written a nice <a href="http://nbviewer.ipython.org/github/mcleonard/sampyl/blob/master/Examples.ipynb">example notebook</a> for Sampyl, but here I will use it to analyze some fake A/B testing data.</p>
+<!-- fold -->
+
+<div class="highlight"><pre><span class="o">%</span><span class="n">matplotlib</span> <span class="n">inline</span>
+
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="kn">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">seaborn</span>
+<span class="kn">import</span> <span class="nn">scipy.stats</span> <span class="kn">as</span> <span class="nn">stats</span>
+<span class="kn">from</span> <span class="nn">scipy.misc</span> <span class="kn">import</span> <span class="n">comb</span>
+<span class="kn">import</span> <span class="nn">scipy</span> <span class="kn">as</span> <span class="nn">sp</span>
+
+<span class="kn">import</span> <span class="nn">sampyl</span> <span class="kn">as</span> <span class="nn">smp</span>
+<span class="kn">from</span> <span class="nn">sampyl</span> <span class="kn">import</span> <span class="n">np</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">seaborn</span><span class="o">.</span><span class="n">set_context</span><span class="p">(</span><span class="s2">&quot;notebook&quot;</span><span class="p">,</span> <span class="n">font_scale</span><span class="o">=</span><span class="mf">1.25</span><span class="p">)</span>
+</pre></div>
+
+
+<h2>A/B testing</h2>
+<p>Many businesses with websites perform large scale experiments on their users aimed at improving revenue or user retention. Commonly, users visiting the website are split between two versions, A and B, which might have different user interfaces, placement of advertisements, or content. Then, we'd want to know if the new design (B) is better than the old one (A) according to some metric such as the proportion of users who click through to the next page and sign up for the service.</p>
+<p>Suppose we want to know if there is a statistically significant difference in the click through rate between versions A and B. To answer this, we can build a simple Bayesian model. Bayesian data analysis utilizes Bayes' theorem to infer the distribution of parameters given observed data. Bayes' theorem is fairly simple,</p>
+<div class="math">$$ P( \theta \mid D) \propto P(D \mid \theta) \, P(\theta), $$</div>
+<p>or in words, the probability distribution of parameters <span class="math">\(\theta\)</span> given your data <span class="math">\(D\)</span> is proportional to the likelihood <span class="math">\(P(D \mid \theta)\)</span> of seeing data <span class="math">\(D\)</span> given parameters <span class="math">\(\theta\)</span> and your prior beliefs about <span class="math">\(\theta\)</span>, <span class="math">\(P(\theta)\)</span>. The distribution <span class="math">\(P( \theta \mid D)\)</span> is called the posterior because it represents your beliefs about <span class="math">\(\theta\)</span> <em>after</em> seeing the data <span class="math">\(D\)</span>, while <span class="math">\(P(\theta)\)</span> is called the prior because it represents beliefs <em>before</em> seeing data.</p>
+<p>This expression in mathematics is very similar to how humans think. Typically you have initial beliefs about a claim, this is represented by <span class="math">\(P(\theta)\)</span>. For instance, suppose you think your new haircut is amazing. Then at work you get a lot of complements, which of course is highly likely according to your beliefs. Now you believe even more strongly that you have the best hair ever cut in the history of the world, because everyone said so.</p>
+<p>We can apply this framework to build a model for A/B testing which will tell us if B is better than A or not.  The model is built like so, where <span class="math">\(p\)</span> is the proportial of users who click through:</p>
+<div class="math">\begin{align}
+P(p \mid D) &amp;\propto P(D \mid p)\, P(p) \\
+P(D \mid p) &amp;\sim \mathrm{Binomial}(D \mid p) \\
+P(p) &amp;\sim \mathrm{Beta}(\alpha, \beta) \\
+\end{align}</div>
+<p>We can the likelihood <span class="math">\(P(D \mid p)\)</span> by thinking of how we would generate data. The binomial distribution describes how many successes you would see in some number of attempts, given a probability of success. Tossing coins is described by a binomial distribution, where <span class="math">\(p = \frac{1}{2}\)</span> for a fair coin. So, our data is the number of people who click through (the number of coins ending heads up) given the total number of people seeing the page (total number of coin flips), with some probability that any given person will click through.</p>
+<p>Our prior beliefs about this probability can be captured by the <a href="https://en.wikipedia.org/wiki/Beta_distribution">beta distribution</a>. The beta distribution is defined only between 0 and 1, just like <span class="math">\(p\)</span>, and by setting <span class="math">\(\alpha\)</span> and <span class="math">\(\beta\)</span> appropriately, we can express our beliefs about possible values for <span class="math">\(p\)</span>. For instance, we know from past experience that the click through rate is always around <span class="math">\(p = 0.1\)</span>, so it wouldn't make sense for us to include much probability that <span class="math">\(p &gt; 0.5\)</span>, for instance we could chose this:</p>
+<div class="highlight"><pre><span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">100</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">sp</span><span class="o">.</span><span class="n">stats</span><span class="o">.</span><span class="n">beta</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">pdf</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s2">&quot;Beta(2, 8)&quot;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.text.Text at 0x11408f410&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/ab_testing_with_sampyl_4_1.png" /></p>
+<h2>Building a model</h2>
+<p>Now I'm going to construct a function that calculates <span class="math">\(\log P(p \mid D)\)</span> and sample from it with sampyl. But first, I'll need to construct some fake data, where B will have an additional 1% click through rate.</p>
+<div class="highlight"><pre><span class="n">N</span> <span class="o">=</span> <span class="mi">1000</span>  <span class="c1"># Users in experiment</span>
+<span class="n">A</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">binomial</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="mf">0.10</span><span class="p">)</span>
+<span class="n">B</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">binomial</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="mf">0.11</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="kn">from</span> <span class="nn">sampyl.priors</span> <span class="kn">import</span> <span class="n">bound</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">8</span>
+<span class="k">def</span> <span class="nf">logp</span><span class="p">(</span><span class="n">pA</span><span class="p">,</span> <span class="n">pB</span><span class="p">):</span>
+    <span class="c1"># Likelihoods for A and B</span>
+    <span class="n">likelihood</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">px</span><span class="p">:</span> <span class="n">bound</span><span class="p">(</span><span class="n">x</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">px</span><span class="p">)</span> <span class="o">+</span> 
+                                     <span class="p">(</span><span class="n">N</span> <span class="o">-</span> <span class="n">x</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">px</span><span class="p">),</span>
+                                     <span class="mi">0</span> <span class="o">&lt;</span> <span class="n">px</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">likelihood_A</span> <span class="o">=</span> <span class="n">likelihood</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">pA</span><span class="p">)</span>
+    <span class="n">likelihood_B</span> <span class="o">=</span> <span class="n">likelihood</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="n">pB</span><span class="p">)</span>
+
+    <span class="c1"># Beta priors over A and B</span>
+    <span class="n">beta_prior</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">px</span><span class="p">:</span> <span class="n">bound</span><span class="p">((</span><span class="n">alpha</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">px</span><span class="p">)</span> <span class="o">+</span> 
+                                  <span class="p">(</span><span class="n">beta</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">px</span><span class="p">),</span>
+                                  <span class="mi">0</span> <span class="o">&lt;</span> <span class="n">px</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">prior_A</span> <span class="o">=</span> <span class="n">beta_prior</span><span class="p">(</span><span class="n">pA</span><span class="p">)</span>
+    <span class="n">prior_B</span> <span class="o">=</span> <span class="n">beta_prior</span><span class="p">(</span><span class="n">pB</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">likelihood_A</span> <span class="o">+</span> <span class="n">likelihood_B</span> <span class="o">+</span> <span class="n">prior_A</span> <span class="o">+</span> <span class="n">prior_B</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">nuts</span> <span class="o">=</span> <span class="n">smp</span><span class="o">.</span><span class="n">NUTS</span><span class="p">(</span><span class="n">logp</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;pA&#39;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">,</span> <span class="s1">&#39;pB&#39;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">})</span>
+<span class="n">trace</span> <span class="o">=</span> <span class="n">nuts</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span><span class="mi">1000</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">pA</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">pB</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>[&lt;matplotlib.lines.Line2D at 0x1133e23d0&gt;]
+</pre></div>
+
+
+<p><img alt="png" src="images/ab_testing_with_sampyl_10_1.png" /></p>
+<div class="highlight"><pre><span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">pA</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=.</span><span class="mi">5</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;$p_A$&#39;</span><span class="p">)</span>
+<span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">trace</span><span class="o">.</span><span class="n">pB</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=.</span><span class="mi">5</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;$p_B$&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">fontsize</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Click-through probability&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.text.Text at 0x11472b650&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/ab_testing_with_sampyl_11_1.png" /></p>
+<p>Now that we have estimates for <span class="math">\(p_A\)</span> and <span class="math">\(p_B\)</span>, we can calculate a probability that <span class="math">\(p_B &gt; p_A\)</span>. Simply, we'll find the difference, <span class="math">\(\delta = p_B - p_A\)</span>, then measure the proportion of samples where <span class="math">\(\delta &gt; 0\)</span>.</p>
+<div class="highlight"><pre><span class="n">delta</span> <span class="o">=</span> <span class="n">trace</span><span class="o">.</span><span class="n">pB</span> <span class="o">-</span> <span class="n">trace</span><span class="o">.</span><span class="n">pA</span>
+<span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">delta</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">vlines</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">140</span><span class="p">,</span> <span class="n">linestyles</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+<span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;$\delta$&#39;</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Probability that p_B &gt; p_A = {}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">((</span><span class="n">delta</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>Probability that p_B &gt; p_A = 0.871
+</pre></div>
+
+
+<p><img alt="png" src="images/ab_testing_with_sampyl_13_1.png" /></p>
+<p>This is just under what we would typically call significant. It is important to note that our result is different than the p-value you get from hypothesis testing. For our Bayesian estimation here, we literally are calculating the probability that <span class="math">\(p_B &gt; p_A\)</span>, based solely on our data and our previous knowledge of the problem. However, with hypothesis testing, <span class="math">\(p\)</span> is the probability that you would see a result at least as extreme as the one you found if you repeated the experiment infinite times. If you want more to read about Bayesian data analysis, I suggest <a href="https://jakevdp.github.io/blog/2014/03/11/frequentism-and-bayesianism-a-practical-intro/">this great series</a> by Jake VanderPlas.</p>
+<script type="text/javascript">if (!document.getElementById('mathjaxscript_pelican_#%@#$@#')) {
+    var align = "center",
+        indent = "0em",
+        linebreak = "false";
+
+    if (false) {
+        align = (screen.width < 768) ? "left" : align;
+        indent = (screen.width < 768) ? "0em" : indent;
+        linebreak = (screen.width < 768) ? 'true' : linebreak;
+    }
+
+    var mathjaxscript = document.createElement('script');
+    var location_protocol = (false) ? 'https' : document.location.protocol;
+    if (location_protocol !== 'http' && location_protocol !== 'https') location_protocol = 'https:';
+    mathjaxscript.id = 'mathjaxscript_pelican_#%@#$@#';
+    mathjaxscript.type = 'text/javascript';
+    mathjaxscript.src = location_protocol + '//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML';
+    mathjaxscript[(window.opera ? "innerHTML" : "text")] =
+        "MathJax.Hub.Config({" +
+        "    config: ['MMLorHTML.js']," +
+        "    TeX: { extensions: ['AMSmath.js','AMSsymbols.js','noErrors.js','noUndefined.js'], equationNumbers: { autoNumber: 'AMS' } }," +
+        "    jax: ['input/TeX','input/MathML','output/HTML-CSS']," +
+        "    extensions: ['tex2jax.js','mml2jax.js','MathMenu.js','MathZoom.js']," +
+        "    displayAlign: '"+ align +"'," +
+        "    displayIndent: '"+ indent +"'," +
+        "    showMathMenu: true," +
+        "    messageStyle: 'normal'," +
+        "    tex2jax: { " +
+        "        inlineMath: [ ['\\\\(','\\\\)'] ], " +
+        "        displayMath: [ ['$$','$$'] ]," +
+        "        processEscapes: true," +
+        "        preview: 'TeX'," +
+        "    }, " +
+        "    'HTML-CSS': { " +
+        "        styles: { '.MathJax_Display, .MathJax .mo, .MathJax .mi, .MathJax .mn': {color: 'inherit ! important'} }," +
+        "        linebreaks: { automatic: "+ linebreak +", width: '90% container' }," +
+        "    }, " +
+        "}); " +
+        "if ('default' !== 'default') {" +
+            "MathJax.Hub.Register.StartupHook('HTML-CSS Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax['HTML-CSS'].FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+            "MathJax.Hub.Register.StartupHook('SVG Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax.SVG.FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+        "}";
+    (document.body || document.getElementsByTagName('head')[0]).appendChild(mathjaxscript);
+}
+</script></div>
+    <footer>
+<p class="meta">
+  <span class="byline author vcard">
+    Posted by <span class="fn">
+        Mat Leonard
+    </span>
+  </span>
+<time datetime="2016-01-31T01:18:00-08:00" pubdate>Jan 31, 2016</time>  <span class="categories">
+    <a class='category' href='/category/misc.html'>misc</a>
+  </span>
+  <span class="categories">
+    <a class="category" href="/tag/statistics.html">Statistics</a>,    <a class="category" href="/tag/python.html">Python</a>,    <a class="category" href="/tag/sampyl.html">Sampyl</a>  </span>
+</p><div class="sharing">
+</div>    </footer>
+  </article>
+
+</div>
+<aside class="sidebar">
+  <section>
+    <h1>Recent Posts</h1>
+    <ul id="recent_posts">
+      <li class="post">
+          <a href="/yelp-timelines.html">Yelp Rating Timelines</a>
+      </li>
+      <li class="post">
+          <a href="/men-have-journals-women-have-diaries.html">Men have journals, women have diaries</a>
+      </li>
+      <li class="post">
+          <a href="/p-values-statistical-testing.html">Hypothesis testing and the origin of p-values</a>
+      </li>
+      <li class="post">
+          <a href="/github-hosting-documentation.html">Hosting Sphinx documentation on GitHub</a>
+      </li>
+      <li class="post">
+          <a href="/body-fat-percentage.html">Predicting body fat percentage</a>
+      </li>
+    </ul>
+  </section>
+  <section>
+      
+    <h1>Categories</h1>
+    <ul id="recent_posts">
+        <li><a href="/category/misc.html">misc</a></li>
+    </ul>
+  </section>
+ 
+
+  <section>
+  <h1>Tags</h1>
+    <a href="/tag/documentation.html">Documentation</a>,    <a href="/tag/python.html">Python</a>,    <a href="/tag/data-science.html">Data Science</a>,    <a href="/tag/misc.html">Misc</a>,    <a href="/tag/sampyl.html">Sampyl</a>,    <a href="/tag/statistics.html">Statistics</a>  </section>
+
+
+
+</aside>    </div>
+  </div>
+  <footer role="contentinfo"><p>
+    Copyright &copy;  2016  Mat Leonard &mdash;
+  <span class="credit">Powered by <a href="http://getpelican.com">Pelican</a></span>
+</p></footer>
+  <script src="/theme/js/modernizr-2.0.js"></script>
+  <script src="/theme/js/ender.js"></script>
+  <script src="/theme/js/octopress.js" type="text/javascript"></script>
+</body>
+</html>

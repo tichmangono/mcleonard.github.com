@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>Predicting body fat percentage &mdash; Matatat.org</title>
+  <meta name="author" content="Mat Leonard">
+
+
+
+
+
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+
+    <link href="/favicon.png" rel="icon">
+
+  <link href="/theme/css/main.css" media="screen, projection"
+        rel="stylesheet" type="text/css">
+
+  <link href="//fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+  <link href="//fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+</head>
+
+<body>
+  <header role="banner"><hgroup>
+  <h1><a href="/">Matatat.org</a></h1>
+</hgroup></header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+</ul>
+
+
+<ul class="main-navigation">
+    <li><a href="/archives.html">Archives</a></li>
+      <li><a href="/pages/about.html">About</a></li>
+</ul></nav>
+  <div id="main">
+    <div id="content">
+<div>
+  <article class="hentry" role="article">
+<header>
+      <h1 class="entry-title">Predicting body fat percentage</h1>
+    <p class="meta">
+<time datetime="2016-01-31T13:46:00-08:00" pubdate>Jan 31, 2016</time>    </p>
+</header>
+
+  <div class="entry-content"><p>For the past few months, I've been commuting to work on my bicycle. I've always been a walker, but I've been out of shape and slowly gaining fat for some time now.  The new activity has led to some obvious weight loss. This has inspired me to keep working at it and track my progress. As part of this, I wanted to measure my percent body fat using tools I have around my apartment. You can find calculators out on the internet which give you a singular estimate. Being a scientist though, I want some knowledge of the uncertainty of the estimate. I decided to build my own model from data which I can use to get an estimate, with the uncertainty, of my body fat percentage.</p>
+<p>I found <a href="http://www.amstat.org/publications/jse/v4n1/datasets.johnson.html">data from a study</a> which measured the body density and various anatomical measurements (such as neck and chest circumferences) of a group of men. From my research, I found that body density can be measured accurately using water or air displacement. However, it is unclear how to convert density into body fat percentage because you must assume a distribution of lean and fatty tissues. There are more than a few methods, but for this analysis I'm going to use <a href="http://www.ncbi.nlm.nih.gov/pubmed/14062375">Brozek's method</a>.</p>
+<p>First we'll start by importing some packages we'll use and then import the data.</p>
+
+
+<div class="highlight"><pre><span class="o">%</span><span class="n">matplotlib</span> <span class="n">inline</span>
+<span class="o">%</span><span class="n">config</span> <span class="n">InlineBackend</span><span class="o">.</span><span class="n">figure_format</span> <span class="o">=</span> <span class="s1">&#39;retina&#39;</span>
+
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="kn">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="kn">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">seaborn</span> <span class="kn">as</span> <span class="nn">sb</span>
+<span class="n">sb</span><span class="o">.</span><span class="n">set_context</span><span class="p">(</span><span class="s2">&quot;notebook&quot;</span><span class="p">,</span> <span class="n">font_scale</span><span class="o">=</span><span class="mf">1.25</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">data</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s1">&#39;/Users/mat/Data/BFP/fat.dat.txt&#39;</span><span class="p">,</span> 
+                   <span class="n">delim_whitespace</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">header</span><span class="o">=</span><span class="bp">None</span><span class="p">)</span>
+<span class="n">data</span><span class="o">.</span><span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;case&#39;</span><span class="p">,</span> <span class="s1">&#39;pbf_b&#39;</span><span class="p">,</span> <span class="s1">&#39;pbf_s&#39;</span><span class="p">,</span> <span class="s1">&#39;density&#39;</span><span class="p">,</span> <span class="s1">&#39;age&#39;</span><span class="p">,</span> <span class="s1">&#39;weight&#39;</span><span class="p">,</span> 
+                <span class="s1">&#39;height&#39;</span><span class="p">,</span> <span class="s1">&#39;bmi&#39;</span><span class="p">,</span><span class="s1">&#39;fat_free_w&#39;</span><span class="p">,</span> <span class="s1">&#39;neck&#39;</span><span class="p">,</span> <span class="s1">&#39;chest&#39;</span><span class="p">,</span> <span class="s1">&#39;abdomen&#39;</span><span class="p">,</span> 
+                <span class="s1">&#39;hip&#39;</span><span class="p">,</span> <span class="s1">&#39;thigh&#39;</span><span class="p">,</span> <span class="s1">&#39;knee&#39;</span><span class="p">,</span> <span class="s1">&#39;ankle&#39;</span><span class="p">,</span><span class="s1">&#39;biceps&#39;</span><span class="p">,</span> <span class="s1">&#39;forearm&#39;</span><span class="p">,</span> <span class="s1">&#39;wrist&#39;</span><span class="p">]</span>
+<span class="n">data</span><span class="o">.</span><span class="n">index</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;case&#39;</span><span class="p">]</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">drop</span><span class="p">([</span><span class="s1">&#39;case&#39;</span><span class="p">,</span> <span class="s1">&#39;fat_free_w&#39;</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="c1"># Remove a few data points (outliers, incorrect values)</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">drop</span><span class="p">([</span><span class="mi">42</span><span class="p">,</span> <span class="mi">182</span><span class="p">])</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;weight&#39;</span><span class="p">]</span><span class="o">&lt;</span><span class="mi">300</span><span class="p">]</span>
+</pre></div>
+
+
+<p>Now that the data is loaded, we can check it out. We'll look at the first few cases, then make some plots so we can see how some of the data is distributed. The first two columns are percent body fat (PBF) using the Brozek and Siri formula's, respectively. Every column from "neck" on is the circumference at those locations.</p>
+<div class="highlight"><pre><span class="n">data</span><span class="o">.</span><span class="n">head</span><span class="p">()</span>
+</pre></div>
+
+
+<div style="max-height:1000px;max-width:1500px;overflow:auto;">
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>pbf_b</th>
+      <th>pbf_s</th>
+      <th>density</th>
+      <th>age</th>
+      <th>weight</th>
+      <th>height</th>
+      <th>bmi</th>
+      <th>neck</th>
+      <th>chest</th>
+      <th>abdomen</th>
+      <th>hip</th>
+      <th>thigh</th>
+      <th>knee</th>
+      <th>ankle</th>
+      <th>biceps</th>
+      <th>forearm</th>
+      <th>wrist</th>
+    </tr>
+    <tr>
+      <th>case</th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>1</th>
+      <td> 12.6</td>
+      <td> 12.3</td>
+      <td> 1.0708</td>
+      <td> 23</td>
+      <td> 154.25</td>
+      <td> 67.75</td>
+      <td> 23.7</td>
+      <td> 36.2</td>
+      <td>  93.1</td>
+      <td>  85.2</td>
+      <td>  94.5</td>
+      <td> 59.0</td>
+      <td> 37.3</td>
+      <td> 21.9</td>
+      <td> 32.0</td>
+      <td> 27.4</td>
+      <td> 17.1</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>  6.9</td>
+      <td>  6.1</td>
+      <td> 1.0853</td>
+      <td> 22</td>
+      <td> 173.25</td>
+      <td> 72.25</td>
+      <td> 23.4</td>
+      <td> 38.5</td>
+      <td>  93.6</td>
+      <td>  83.0</td>
+      <td>  98.7</td>
+      <td> 58.7</td>
+      <td> 37.3</td>
+      <td> 23.4</td>
+      <td> 30.5</td>
+      <td> 28.9</td>
+      <td> 18.2</td>
+    </tr>
+    <tr>
+      <th>3</th>
+      <td> 24.6</td>
+      <td> 25.3</td>
+      <td> 1.0414</td>
+      <td> 22</td>
+      <td> 154.00</td>
+      <td> 66.25</td>
+      <td> 24.7</td>
+      <td> 34.0</td>
+      <td>  95.8</td>
+      <td>  87.9</td>
+      <td>  99.2</td>
+      <td> 59.6</td>
+      <td> 38.9</td>
+      <td> 24.0</td>
+      <td> 28.8</td>
+      <td> 25.2</td>
+      <td> 16.6</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td> 10.9</td>
+      <td> 10.4</td>
+      <td> 1.0751</td>
+      <td> 26</td>
+      <td> 184.75</td>
+      <td> 72.25</td>
+      <td> 24.9</td>
+      <td> 37.4</td>
+      <td> 101.8</td>
+      <td>  86.4</td>
+      <td> 101.2</td>
+      <td> 60.1</td>
+      <td> 37.3</td>
+      <td> 22.8</td>
+      <td> 32.4</td>
+      <td> 29.4</td>
+      <td> 18.2</td>
+    </tr>
+    <tr>
+      <th>5</th>
+      <td> 27.8</td>
+      <td> 28.7</td>
+      <td> 1.0340</td>
+      <td> 24</td>
+      <td> 184.25</td>
+      <td> 71.25</td>
+      <td> 25.6</td>
+      <td> 34.4</td>
+      <td>  97.3</td>
+      <td> 100.0</td>
+      <td> 101.9</td>
+      <td> 63.2</td>
+      <td> 42.2</td>
+      <td> 24.0</td>
+      <td> 32.2</td>
+      <td> 27.7</td>
+      <td> 17.7</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<div class="highlight"><pre><span class="n">sb</span><span class="o">.</span><span class="n">pairplot</span><span class="p">(</span><span class="n">data</span><span class="p">[[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">,</span> <span class="s1">&#39;bmi&#39;</span><span class="p">,</span> <span class="s1">&#39;wrist&#39;</span><span class="p">,</span> <span class="s1">&#39;abdomen&#39;</span><span class="p">]],</span> 
+                 <span class="n">size</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">plot_kws</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;s&#39;</span><span class="p">:</span><span class="mi">15</span><span class="p">,</span><span class="s1">&#39;edgecolor&#39;</span><span class="p">:</span><span class="s1">&#39;none&#39;</span><span class="p">,</span><span class="s1">&#39;alpha&#39;</span><span class="p">:</span><span class="mf">0.7</span><span class="p">})</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;seaborn.axisgrid.PairGrid at 0x1179d0b10&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/body_fat_percentage_5_1.png" /></p>
+<p>From this we can see the percent body fat is correlated with weight and body measurements, while height has little if any effect. There are also correlations between body measurements and weight which we'll have to deal with later. I'm going to use a <a href="http://en.wikipedia.org/wiki/Linear_regression">linear regression model</a> to predict percent body fat from the data.</p>
+<p>A linear regression model is a formal way to draw a line through a set of data points. For instance, we can see that when we plot abdomen circumference on the x-axis and percent body fat on the y-axis (first row, fifth column), the data falls along a general upward sloped line. As we would expect, a larger gut indicates more body fat. We can get a decent estimate of this relationship by printing out the plot and drawing a line through the data points by hand. However, we want to find the "best" line. What I mean by "best" is that the line we draw has the least error predicting the existing data points.</p>
+<p>We can define any line using an intercept, <span class="math">\(\beta_0\)</span>,  and a slope, <span class="math">\(\beta_1\)</span>, as <span class="math">\(y = \beta_0 + \beta_1 x\)</span>. Here, <span class="math">\(y\)</span> is our dependent variable, percent body fat for example, and <span class="math">\(x\)</span> is the independent variable, such as abdomen circumference. Depending on the context and conventions, <span class="math">\(x\)</span> is also called the explanatory variable, regressor, feature, predictor, and more. Our model is a prediction of the percent body fat <span class="math">\(\hat{y}\)</span> using the abdomen circumference <span class="math">\(x\)</span>,
+</p>
+<div class="math">$$
+\hat{y}_i = \beta_0 + \beta_1 x_i,
+$$</div>
+<p>
+where the subscript <span class="math">\(i\)</span> indicates which data point we are using (<span class="math">\(i=1\)</span> is the first data point, and so on). Our goal here is to find values for <span class="math">\(\beta_0\)</span> and <span class="math">\(\beta_1\)</span> which give us the smallest error <span class="math">\(\epsilon_i = y_i - \hat{y}_i\)</span>. We can actually find an exact solution to this problem if we minimize the sum of the squares of the errors, </p>
+<div class="math">$$
+SSE = \sum_{i=1}^{n} \left|\, y_i - \hat{y}_i \right|^2 ,
+$$</div>
+<p>using the <a href="http://en.wikipedia.org/wiki/Ordinary_least_squares">ordinary least squares</a> method. Here I will use the excellent <a href="http://scikit-learn.org/stable/">scikits learn</a> Python package to fit a linear model to our data.</p>
+<div class="highlight"><pre><span class="kn">from</span> <span class="nn">sklearn</span> <span class="kn">import</span> <span class="n">linear_model</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">features</span> <span class="o">=</span> <span class="n">data</span><span class="p">[[</span><span class="s1">&#39;abdomen&#39;</span><span class="p">]]</span>
+
+<span class="c1"># Make an intercept column that is all 1</span>
+<span class="n">features</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span><span class="s1">&#39;intercept&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">features</span><span class="p">)),</span> <span class="n">index</span><span class="o">=</span><span class="n">features</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+<span class="c1"># This is the part that fits the linear model to the data</span>
+<span class="n">linmodel</span> <span class="o">=</span> <span class="n">linear_model</span><span class="o">.</span><span class="n">LinearRegression</span><span class="p">(</span><span class="n">fit_intercept</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="n">linmodel</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">])</span>
+
+<span class="c1"># And here I&#39;ll calculate the variances and print our results</span>
+<span class="n">var_e</span> <span class="o">=</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">residues_</span><span class="o">/</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">))</span>
+<span class="n">var_b</span> <span class="o">=</span> <span class="n">var_e</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">features</span><span class="p">))</span><span class="o">.</span><span class="n">diagonal</span><span class="p">()</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Coefficients and standard dev.&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">feature</span><span class="p">,</span> <span class="n">coef</span><span class="p">,</span> <span class="n">var</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">,</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">var_b</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{}: {:.3f} +\- {:.3f}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">feature</span><span class="p">,</span> <span class="n">coef</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">var</span><span class="p">)))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>Coefficients and standard dev.
+abdomen: 0.616 +\- 0.027
+intercept: -37.991 +\- 2.541
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">fig</span><span class="p">,</span> <span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">right</span><span class="p">)</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">ncols</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span><span class="mi">4</span><span class="p">))</span>
+<span class="n">color</span> <span class="o">=</span> <span class="n">sb</span><span class="o">.</span><span class="n">color_palette</span><span class="p">(</span><span class="s1">&#39;deep&#39;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">left</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">data</span><span class="p">[[</span><span class="s1">&#39;abdomen&#39;</span><span class="p">]],</span> <span class="n">data</span><span class="p">[[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]],</span> <span class="n">color</span><span class="o">=</span><span class="n">color</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Data&#39;</span><span class="p">)</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">60</span><span class="p">,</span> <span class="mi">130</span><span class="p">,</span> <span class="mi">100</span><span class="p">)</span>
+<span class="n">left</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="n">x</span><span class="p">,</span> <span class="s1">&#39;-r&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Model&#39;</span><span class="p">)</span>
+<span class="n">left</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">&quot;Abdomen circumference (cm)&quot;</span><span class="p">)</span>
+<span class="n">left</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Percent body fat&quot;</span><span class="p">)</span>
+<span class="n">left</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">loc</span><span class="o">=</span><span class="s1">&#39;best&#39;</span><span class="p">)</span>
+
+<span class="n">y_hat</span> <span class="o">=</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">coef_</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="n">data</span><span class="p">[[</span><span class="s1">&#39;abdomen&#39;</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+<span class="n">residuals</span> <span class="o">=</span> <span class="n">data</span><span class="p">[[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span> <span class="o">-</span> <span class="n">y_hat</span>
+<span class="n">right</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">data</span><span class="p">[[</span><span class="s1">&#39;abdomen&#39;</span><span class="p">]],</span> <span class="n">residuals</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="n">color</span><span class="p">)</span>
+<span class="n">right</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Residuals&quot;</span><span class="p">)</span>
+<span class="n">_</span><span class="o">=</span><span class="n">right</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">&quot;Abdomen circumference (cm)&quot;</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/body_fat_percentage_9_0.png" /></p>
+<p>We see here that our model fits the data pretty well, but I'd like to measure the quality of the fit. A common way to measure the performance of the model is to split the data into a training set and a testing set. You fit the model to the training set, then measure how well it can predict the test set. This is known as cross-validation (CV) and is sort of the industry standard. I'll use scikits learn to perform <em>k-folds</em> CV. This method separates the data into <span class="math">\(k\)</span> parts (folds). Then, it uses <span class="math">\(k-1\)</span> folds to fit the model and then tests the model on the left out fold. Repeat this <span class="math">\(k\)</span> times using each fold to test only once.</p>
+<div class="highlight"><pre><span class="kn">from</span> <span class="nn">sklearn.cross_validation</span> <span class="kn">import</span> <span class="n">cross_val_score</span>
+<span class="n">scores</span> <span class="o">=</span> <span class="n">cross_val_score</span><span class="p">(</span><span class="n">linmodel</span><span class="p">,</span> <span class="n">features</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">],</span>
+                         <span class="n">cv</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="s1">&#39;mean_absolute_error&#39;</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Mean absolute error: {:.3f}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">-</span><span class="n">scores</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>Mean absolute error: 3.620
+</pre></div>
+
+
+<p>We can improve our model by including all the information we have in the data. Using a linear model makes this simple, we just add more coefficients. For each data point we have <span class="math">\(m\)</span> features and we can use them to predict the body fat percentage <span class="math">\(\hat{y}\)</span>:</p>
+<div class="math">$$
+\hat{y}_i = \beta_0 + \beta_1 x_{i,1} + \beta_2 x_{i,2} + \cdots + \beta_m x_{i,m}
+= \sum_{j=1}^{m} \beta_j x_j
+$$</div>
+<p>where the subscript <span class="math">\(j\)</span> indicates our data features and <span class="math">\(x_0 = 1\)</span>. For convenience, we can write our model in matrix notation:</p>
+<div class="math">$$
+\hat{y} = X \beta,
+$$</div>
+<div class="math">$$
+\hat{y} = \left( \begin{array}{c}
+y_1    \\
+y_2    \\
+\vdots \\
+y_n  \end{array} \right)
+\hspace{2em} \beta = \left( \begin{array}{c}
+\beta_0  \\
+\beta_1  \\
+\vdots \\
+\beta_m  \end{array} \right)
+\hspace{2em} X = \left( \begin{array}{ccccc}
+1 &amp; x_{1,1} &amp; x_{1,2} &amp; \cdots &amp; x_{1,m} \\
+1 &amp; x_{2,1} &amp; x_{2,2} &amp; \cdots &amp; x_{2,m}  \\
+1 &amp; \vdots &amp; \vdots &amp; \ddots &amp; \vdots \\
+1 &amp; x_{n,1} &amp; x_{1,2} &amp; \cdots &amp; x_{n,m}  \end{array} \right)
+$$</div>
+<p>Again, our error is $ \mathbf{\epsilon} = \sum_{i=1}^{n} \left|\, y_i - \hat{y}_i \right|^2 $ which we want to minimize. There is an exact and unique solution for the coefficients that minimize the error:</p>
+<div class="math">$$
+\hat{\beta} = \left( X^T X \right)^{-1}X^T y
+$$</div>
+<div class="highlight"><pre><span class="n">features</span> <span class="o">=</span> <span class="n">data</span><span class="p">[[</span><span class="s1">&#39;height&#39;</span><span class="p">,</span> <span class="s1">&#39;weight&#39;</span><span class="p">,</span> <span class="s1">&#39;age&#39;</span><span class="p">,</span> <span class="s1">&#39;neck&#39;</span><span class="p">,</span> <span class="s1">&#39;chest&#39;</span><span class="p">,</span> <span class="s1">&#39;abdomen&#39;</span><span class="p">,</span> 
+                 <span class="s1">&#39;hip&#39;</span><span class="p">,</span> <span class="s1">&#39;thigh&#39;</span><span class="p">,</span> <span class="s1">&#39;knee&#39;</span><span class="p">,</span> <span class="s1">&#39;ankle&#39;</span><span class="p">,</span><span class="s1">&#39;biceps&#39;</span><span class="p">,</span> <span class="s1">&#39;forearm&#39;</span><span class="p">,</span> 
+                 <span class="s1">&#39;wrist&#39;</span><span class="p">]]</span>
+<span class="n">features</span><span class="o">.</span><span class="n">loc</span><span class="p">[:,</span><span class="s1">&#39;intercept&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">features</span><span class="p">)),</span> 
+                                        <span class="n">index</span><span class="o">=</span><span class="n">features</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+<span class="n">linmodel</span> <span class="o">=</span> <span class="n">linear_model</span><span class="o">.</span><span class="n">LinearRegression</span><span class="p">(</span><span class="n">fit_intercept</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="n">linmodel</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">])</span>
+
+<span class="n">scores</span> <span class="o">=</span> <span class="n">cross_val_score</span><span class="p">(</span><span class="n">linmodel</span><span class="p">,</span> <span class="n">features</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">],</span>
+                         <span class="n">cv</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="s1">&#39;mean_absolute_error&#39;</span><span class="p">)</span>
+<span class="n">var_e</span> <span class="o">=</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">residues_</span><span class="o">/</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span> <span class="o">-</span> <span class="mf">1.</span><span class="p">)</span>
+<span class="n">var_b</span> <span class="o">=</span> <span class="n">var_e</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">features</span><span class="p">))</span><span class="o">.</span><span class="n">diagonal</span><span class="p">()</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Coefficients and standard dev.&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">feature</span><span class="p">,</span> <span class="n">coef</span><span class="p">,</span> <span class="n">var</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">,</span> <span class="n">linmodel</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">var_b</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{}: {:.3f} +\- {:.3f}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">feature</span><span class="p">,</span> <span class="n">coef</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">var</span><span class="p">)))</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Mean absolute error: {:.3f}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">-</span><span class="n">scores</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>Coefficients and standard dev.
+height: -0.248 +\- 0.178
+weight: -0.006 +\- 0.063
+age: 0.065 +\- 0.030
+neck: -0.355 +\- 0.218
+chest: -0.132 +\- 0.101
+abdomen: 0.839 +\- 0.085
+hip: -0.157 +\- 0.135
+thigh: 0.151 +\- 0.137
+knee: -0.070 +\- 0.227
+ankle: 0.161 +\- 0.204
+biceps: 0.164 +\- 0.158
+forearm: 0.250 +\- 0.192
+wrist: -1.663 +\- 0.494
+intercept: 7.259 +\- 21.873
+Mean absolute error: 3.353
+</pre></div>
+
+
+<p>Since we know that many of our features are correlated, we can use <a href="http://en.wikipedia.org/wiki/Tikhonov_regularization">ridge regression</a> to obtain a better prediction. Ridge regression is similar to normal linear regression, but we add a term to the error function that penalizes the size of the coefficients,</p>
+<div class="math">$$
+\mathbf{\epsilon} = \sum_{i=1}^{n} \left|\, y_i - \hat{y}_i \right|^2 + \lambda \sum_j^m\beta_j^2 .
+$$</div>
+<p>The penalty pulls the coefficients towards zero, a process known as  <em>shrinkage</em>, and decreases the variance in the model, leading towards better predictions. The amount of shrinkage is controlled by the parameter <span class="math">\(\lambda\)</span>, as <span class="math">\(\lambda \rightarrow \infty\)</span> all coefficients go to zero, and as <span class="math">\(\lambda \rightarrow 0\)</span> we get our normal linear regression. However, there is no way to know before hand what the best value for <span class="math">\(\lambda\)</span> is. I can find the best <span class="math">\(\lambda\)</span> by fitting a bunch of models with different <span class="math">\(\lambda\)</span> and choose the one with the least prediction error. This is typically done with (again) cross-validation and is available from scikits-learn.</p>
+<p>I'll also need to scale the features so that all the coefficients are on the same scale, and center the dependent variable as well.</p>
+<div class="highlight"><pre><span class="kn">from</span> <span class="nn">sklearn.preprocessing</span> <span class="kn">import</span> <span class="n">StandardScaler</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">scaled_features</span> <span class="o">=</span> <span class="n">StandardScaler</span><span class="p">()</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">features</span><span class="p">)</span>
+<span class="n">target</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]</span><span class="o">-</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+
+<span class="n">ridge</span> <span class="o">=</span> <span class="n">linear_model</span><span class="o">.</span><span class="n">RidgeCV</span><span class="p">(</span><span class="n">alphas</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">logspace</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">100</span><span class="p">),</span> 
+                             <span class="n">fit_intercept</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="n">ridge</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">scaled_features</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+<span class="n">scores</span> <span class="o">=</span> <span class="n">cross_val_score</span><span class="p">(</span><span class="n">ridge</span><span class="p">,</span> <span class="n">scaled_features</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+                         <span class="n">cv</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="s1">&#39;mean_absolute_error&#39;</span><span class="p">)</span>
+
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Coefficients&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">feature</span><span class="p">,</span> <span class="n">coef</span><span class="p">,</span> <span class="n">var</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">,</span> <span class="n">ridge</span><span class="o">.</span><span class="n">coef_</span><span class="p">,</span> <span class="n">var_b</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{}: {:.3f}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">feature</span><span class="p">,</span> <span class="n">coef</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">var</span><span class="p">)))</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Mean absolute error: {:.3f}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">-</span><span class="n">scores</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>Coefficients
+height: -0.736
+weight: 0.094
+age: 0.908
+neck: -0.781
+chest: -0.822
+abdomen: 7.843
+hip: -0.759
+thigh: 0.717
+knee: -0.153
+ankle: 0.231
+biceps: 0.430
+forearm: 0.461
+wrist: -1.529
+intercept: 0.000
+Mean absolute error: 3.302
+</pre></div>
+
+
+<p>Using ridge regression does improve our model a bit. However, I don't want to have to measure ten things every time I want to calculate my body fat. What I would like to do is find a small number of features that still give me a good prediction. A good method for this is <em>lasso</em> regression which is similar to ridge regression in that it penalizes the size of the coefficients, but instead of simply shrinking them, it sets coefficients to exactly zero. Here the error function is</p>
+<div class="math">$$
+\mathbf{\epsilon} = \sum_{i=1}^{n} \left|\, y_i - \hat{y}_i \right|^2 + \lambda \sum_j^m\beta_j .
+$$</div>
+<p>We can see how the coefficients start at 0 for large <span class="math">\(\lambda\)</span>, then become non-zero as <span class="math">\(\lambda\)</span> is decreased.</p>
+<div class="highlight"><pre><span class="n">features</span> <span class="o">=</span> <span class="n">data</span><span class="p">[[</span><span class="s1">&#39;height&#39;</span><span class="p">,</span> <span class="s1">&#39;weight&#39;</span><span class="p">,</span> <span class="s1">&#39;age&#39;</span><span class="p">,</span> <span class="s1">&#39;neck&#39;</span><span class="p">,</span> <span class="s1">&#39;chest&#39;</span><span class="p">,</span> <span class="s1">&#39;abdomen&#39;</span><span class="p">,</span> 
+                 <span class="s1">&#39;hip&#39;</span><span class="p">,</span> <span class="s1">&#39;thigh&#39;</span><span class="p">,</span> <span class="s1">&#39;knee&#39;</span><span class="p">,</span> <span class="s1">&#39;ankle&#39;</span><span class="p">,</span> <span class="s1">&#39;biceps&#39;</span><span class="p">,</span> <span class="s1">&#39;forearm&#39;</span><span class="p">,</span> 
+                 <span class="s1">&#39;wrist&#39;</span><span class="p">]]</span>
+<span class="n">scaler</span> <span class="o">=</span> <span class="n">StandardScaler</span><span class="p">()</span>
+<span class="n">features</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">scaler</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">features</span><span class="p">),</span> 
+                        <span class="n">index</span><span class="o">=</span><span class="n">features</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+<span class="n">target</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]</span><span class="o">-</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+
+<span class="n">lambdas</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logspace</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="mi">20</span><span class="p">)</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">lambdas</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">each</span> <span class="ow">in</span> <span class="n">lambdas</span><span class="p">:</span>
+    <span class="n">lasso</span> <span class="o">=</span> <span class="n">linear_model</span><span class="o">.</span><span class="n">Lasso</span><span class="p">(</span><span class="n">alpha</span><span class="o">=</span><span class="n">each</span><span class="p">)</span>
+    <span class="n">lasso</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="n">each</span><span class="p">]</span> <span class="o">=</span> <span class="n">lasso</span><span class="o">.</span><span class="n">coef_</span>
+<span class="n">df</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">style</span><span class="o">=</span><span class="s1">&#39;-&#39;</span><span class="p">,</span> <span class="n">logx</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">colormap</span><span class="o">=</span><span class="s1">&#39;Paired&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;$\lambda$&#39;</span><span class="p">)</span>
+<span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;coefficient&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/body_fat_percentage_18_0.png" /></p>
+<p>We can see here that abdomen circumference is always a strong predictor. As <span class="math">\(\lambda\)</span> gets smaller, the coefficient for height becomes non-zero, then wrist circumference and age. I'm going to use these four features for my final model. It is reasonable that height and wrist circumference are negatively related to percent body fat. They indicate how long and how thick your bones are, respectively. Also, it seems that as one gets older, the percent body fat increases, holding everything else constant. I'm guessing this is from a change in the distribution of tissues, younger men having more muscle than older men. Now we can build a simpler model using only these features.</p>
+<div class="highlight"><pre><span class="n">features</span> <span class="o">=</span> <span class="n">data</span><span class="p">[[</span><span class="s1">&#39;height&#39;</span><span class="p">,</span> <span class="s1">&#39;age&#39;</span><span class="p">,</span> <span class="s1">&#39;abdomen&#39;</span><span class="p">,</span> <span class="s1">&#39;wrist&#39;</span><span class="p">]]</span>
+
+<span class="n">scaler</span> <span class="o">=</span> <span class="n">StandardScaler</span><span class="p">()</span>
+<span class="n">features</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">scaler</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">features</span><span class="p">),</span> 
+                        <span class="n">index</span><span class="o">=</span><span class="n">features</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+
+<span class="n">target</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]</span><span class="o">-</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+<span class="n">ridge</span> <span class="o">=</span> <span class="n">linear_model</span><span class="o">.</span><span class="n">RidgeCV</span><span class="p">(</span><span class="n">alphas</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">logspace</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span><span class="mi">1</span><span class="p">),</span> <span class="n">fit_intercept</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+<span class="n">ridge</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">features</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+<span class="n">scores</span> <span class="o">=</span> <span class="n">cross_val_score</span><span class="p">(</span><span class="n">ridge</span><span class="p">,</span> <span class="n">features</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="n">target</span><span class="p">,</span>
+                         <span class="n">cv</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">scoring</span><span class="o">=</span><span class="s1">&#39;mean_absolute_error&#39;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">feature</span><span class="p">,</span> <span class="n">coef</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">features</span><span class="o">.</span><span class="n">columns</span><span class="p">,</span> <span class="n">ridge</span><span class="o">.</span><span class="n">coef_</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;{}: {:.3f}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">feature</span><span class="p">,</span> <span class="n">coef</span><span class="p">))</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;Mean abs error: {:.3f}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="o">-</span><span class="n">scores</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>height: -0.794103503894
+age: 0.639106275097
+abdomen: 7.1172689773
+wrist: -1.57077595006
+Mean abs error: 3.29132724978
+</pre></div>
+
+
+<p>Finally, I can predict my own body fat percentage. I'll use the CV error previously calculated as an estimate of the uncertainty.</p>
+<div class="highlight"><pre><span class="n">measurements</span> <span class="o">=</span> <span class="p">[</span><span class="mi">71</span><span class="p">,</span> <span class="mi">31</span><span class="p">,</span> <span class="mi">88</span><span class="p">,</span> <span class="mf">17.5</span><span class="p">]</span>
+<span class="n">scaled</span> <span class="o">=</span> <span class="n">scaler</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">measurements</span><span class="p">)</span>
+<span class="n">my_pbf</span> <span class="o">=</span> <span class="n">ridge</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">scaled</span><span class="p">)</span><span class="o">+</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;pbf_b&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;My PBF = {:.2f}% +/- {:.2f}%&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">my_pbf</span><span class="p">,</span> <span class="o">-</span><span class="n">scores</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>My pbf = 16.17% +/- 3.29%
+</pre></div>
+
+
+<script type="text/javascript">if (!document.getElementById('mathjaxscript_pelican_#%@#$@#')) {
+    var align = "center",
+        indent = "0em",
+        linebreak = "false";
+
+    if (false) {
+        align = (screen.width < 768) ? "left" : align;
+        indent = (screen.width < 768) ? "0em" : indent;
+        linebreak = (screen.width < 768) ? 'true' : linebreak;
+    }
+
+    var mathjaxscript = document.createElement('script');
+    var location_protocol = (false) ? 'https' : document.location.protocol;
+    if (location_protocol !== 'http' && location_protocol !== 'https') location_protocol = 'https:';
+    mathjaxscript.id = 'mathjaxscript_pelican_#%@#$@#';
+    mathjaxscript.type = 'text/javascript';
+    mathjaxscript.src = location_protocol + '//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML';
+    mathjaxscript[(window.opera ? "innerHTML" : "text")] =
+        "MathJax.Hub.Config({" +
+        "    config: ['MMLorHTML.js']," +
+        "    TeX: { extensions: ['AMSmath.js','AMSsymbols.js','noErrors.js','noUndefined.js'], equationNumbers: { autoNumber: 'AMS' } }," +
+        "    jax: ['input/TeX','input/MathML','output/HTML-CSS']," +
+        "    extensions: ['tex2jax.js','mml2jax.js','MathMenu.js','MathZoom.js']," +
+        "    displayAlign: '"+ align +"'," +
+        "    displayIndent: '"+ indent +"'," +
+        "    showMathMenu: true," +
+        "    messageStyle: 'normal'," +
+        "    tex2jax: { " +
+        "        inlineMath: [ ['\\\\(','\\\\)'] ], " +
+        "        displayMath: [ ['$$','$$'] ]," +
+        "        processEscapes: true," +
+        "        preview: 'TeX'," +
+        "    }, " +
+        "    'HTML-CSS': { " +
+        "        styles: { '.MathJax_Display, .MathJax .mo, .MathJax .mi, .MathJax .mn': {color: 'inherit ! important'} }," +
+        "        linebreaks: { automatic: "+ linebreak +", width: '90% container' }," +
+        "    }, " +
+        "}); " +
+        "if ('default' !== 'default') {" +
+            "MathJax.Hub.Register.StartupHook('HTML-CSS Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax['HTML-CSS'].FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+            "MathJax.Hub.Register.StartupHook('SVG Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax.SVG.FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+        "}";
+    (document.body || document.getElementsByTagName('head')[0]).appendChild(mathjaxscript);
+}
+</script></div>
+    <footer>
+<p class="meta">
+  <span class="byline author vcard">
+    Posted by <span class="fn">
+        Mat Leonard
+    </span>
+  </span>
+<time datetime="2016-01-31T13:46:00-08:00" pubdate>Jan 31, 2016</time>  <span class="categories">
+    <a class='category' href='/category/misc.html'>misc</a>
+  </span>
+  <span class="categories">
+    <a class="category" href="/tag/statistics.html">Statistics</a>,    <a class="category" href="/tag/python.html">Python</a>  </span>
+</p><div class="sharing">
+</div>    </footer>
+  </article>
+
+</div>
+<aside class="sidebar">
+  <section>
+    <h1>Recent Posts</h1>
+    <ul id="recent_posts">
+      <li class="post">
+          <a href="/yelp-timelines.html">Yelp Rating Timelines</a>
+      </li>
+      <li class="post">
+          <a href="/men-have-journals-women-have-diaries.html">Men have journals, women have diaries</a>
+      </li>
+      <li class="post">
+          <a href="/p-values-statistical-testing.html">Hypothesis testing and the origin of p-values</a>
+      </li>
+      <li class="post">
+          <a href="/github-hosting-documentation.html">Hosting Sphinx documentation on GitHub</a>
+      </li>
+      <li class="post">
+          <a href="/body-fat-percentage.html">Predicting body fat percentage</a>
+      </li>
+    </ul>
+  </section>
+  <section>
+      
+    <h1>Categories</h1>
+    <ul id="recent_posts">
+        <li><a href="/category/misc.html">misc</a></li>
+    </ul>
+  </section>
+ 
+
+  <section>
+  <h1>Tags</h1>
+    <a href="/tag/documentation.html">Documentation</a>,    <a href="/tag/python.html">Python</a>,    <a href="/tag/data-science.html">Data Science</a>,    <a href="/tag/misc.html">Misc</a>,    <a href="/tag/sampyl.html">Sampyl</a>,    <a href="/tag/statistics.html">Statistics</a>  </section>
+
+
+
+</aside>    </div>
+  </div>
+  <footer role="contentinfo"><p>
+    Copyright &copy;  2016  Mat Leonard &mdash;
+  <span class="credit">Powered by <a href="http://getpelican.com">Pelican</a></span>
+</p></footer>
+  <script src="/theme/js/modernizr-2.0.js"></script>
+  <script src="/theme/js/ender.js"></script>
+  <script src="/theme/js/octopress.js" type="text/javascript"></script>
+</body>
+</html>

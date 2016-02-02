@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>Yelp Rating Timelines &mdash; Matatat.org</title>
+  <meta name="author" content="Mat Leonard">
+
+
+
+
+
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+
+    <link href="/favicon.png" rel="icon">
+
+  <link href="/theme/css/main.css" media="screen, projection"
+        rel="stylesheet" type="text/css">
+
+  <link href="//fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+  <link href="//fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+</head>
+
+<body>
+  <header role="banner"><hgroup>
+  <h1><a href="/">Matatat.org</a></h1>
+</hgroup></header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+</ul>
+
+
+<ul class="main-navigation">
+    <li><a href="/archives.html">Archives</a></li>
+      <li><a href="/pages/about.html">About</a></li>
+</ul></nav>
+  <div id="main">
+    <div id="content">
+<div>
+  <article class="hentry" role="article">
+<header>
+      <h1 class="entry-title">Yelp Rating Timelines</h1>
+    <p class="meta">
+<time datetime="2016-01-31T13:53:00-08:00" pubdate>Jan 31, 2016</time>    </p>
+</header>
+
+  <div class="entry-content"><p>For a while I've been thinking about Yelp reviews, in particular about the information lost by distilling the reviews down to one number. It isn't clear how this number, the average rating, is calculated either. Is it an average over all time? Is it only considering the last month? Or, is it weighted such that more recent reviews have a larger effect on the average?</p>
+<p>A lot of the information lost is in the time domain, the change in time of a business' ratings. Presumably, a change in ownership or management could result in a change in the quality of a business, positively or negatively. Also, a business that just opened might get poor reviews but over time improves through addressing feedback or from the staff gaining more experience. These sort of changes should be present in user reviews on Yelp. I'd like to find a way to see these changes to get a better sense of the quality of a business.</p>
+<p>First, we'll need to grab a bunch of reviews from Yelp. Yelp provides an <a href="https://www.yelp.com/developers/documentation/v2/search_api">API for searching</a> and an API for <a href="https://www.yelp.com/developers/documentation/v2/business">requesting business data</a>. An API is an Application Programming Interface, basically a list of instructions for interfacting with Yelp's data. The way these work is similar to viewing a web page. When you point your browser to a website, you do it with a URL (http://www.yelp.com for instance). Yelp sends you back data containing HTML, CSS, and Javascript. Your browser uses this data to construct the page that you see. The API works similarly, you request data with a URL (http://api.yelp.com/stuff), but instead of getting HTML and such, you get data  formatted  as <a href="http://en.wikipedia.org/wiki/JSON">JSON</a>.</p>
+<p>Using the APIs, we can search like you would on the website, but through Python code. We can also request data about businesses we find from searching. I'll get started by creating a function to perform API requests.</p>
+
+
+<div class="highlight"><pre><span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">urllib2</span>
+
+<span class="kn">import</span> <span class="nn">oauth2</span>
+</pre></div>
+
+
+<p>Using Yelp's API requires secret keys to sign a URL request. Yelp gives you these keys, if you want to try this code, you'll need to get your own. Following Yelp's <a href="https://github.com/Yelp/yelp-api/tree/master/v2/python">sample code</a>, I've written a function to make an API request with OAuth2. To use the APIs, you need to get secret keys from Yelp.</p>
+<div class="highlight"><pre><span class="c1"># Use your own keys here</span>
+<span class="n">TOKEN</span> <span class="o">=</span> <span class="bp">None</span>
+<span class="n">TOKEN_SECRET</span> <span class="o">=</span> <span class="bp">None</span>
+<span class="n">CONSUMER</span> <span class="o">=</span> <span class="bp">None</span>
+<span class="n">CONSUMER_SECRET</span> <span class="o">=</span> <span class="bp">None</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="c1"># This function performs a Yelp API request, taken from Yelp&#39;s python example</span>
+<span class="k">def</span> <span class="nf">api_request</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">url_params</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Make a request with Yelp&#39;s API &quot;&quot;&quot;</span>
+    <span class="n">consumer</span> <span class="o">=</span> <span class="n">oauth2</span><span class="o">.</span><span class="n">Consumer</span><span class="p">(</span><span class="n">CONSUMER</span><span class="p">,</span> <span class="n">CONSUMER_SECRET</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">oauth2</span><span class="o">.</span><span class="n">Token</span><span class="p">(</span><span class="n">TOKEN</span><span class="p">,</span> <span class="n">TOKEN_SECRET</span><span class="p">)</span>
+
+    <span class="n">oauth_request</span> <span class="o">=</span> <span class="n">oauth2</span><span class="o">.</span><span class="n">Request</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s2">&quot;GET&quot;</span><span class="p">,</span> <span class="n">url</span><span class="o">=</span><span class="n">url</span><span class="p">,</span> 
+                                   <span class="n">parameters</span><span class="o">=</span><span class="n">url_params</span><span class="p">)</span>
+    <span class="n">oauth_request</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="s1">&#39;oauth_nonce&#39;</span><span class="p">:</span> <span class="n">oauth2</span><span class="o">.</span><span class="n">generate_nonce</span><span class="p">(),</span>
+                          <span class="s1">&#39;oauth_timestamp&#39;</span><span class="p">:</span> <span class="n">oauth2</span><span class="o">.</span><span class="n">generate_timestamp</span><span class="p">(),</span>
+                          <span class="s1">&#39;oauth_token&#39;</span><span class="p">:</span> <span class="n">TOKEN</span><span class="p">,</span>
+                          <span class="s1">&#39;oauth_consumer_key&#39;</span><span class="p">:</span> <span class="n">CONSUMER</span><span class="p">})</span>
+
+    <span class="n">oauth_request</span><span class="o">.</span><span class="n">sign_request</span><span class="p">(</span><span class="n">oauth2</span><span class="o">.</span><span class="n">SignatureMethod_HMAC_SHA1</span><span class="p">(),</span> 
+                               <span class="n">consumer</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+    <span class="n">signed_url</span> <span class="o">=</span> <span class="n">oauth_request</span><span class="o">.</span><span class="n">to_url</span><span class="p">()</span>
+
+    <span class="n">conn</span> <span class="o">=</span> <span class="n">urllib2</span><span class="o">.</span><span class="n">urlopen</span><span class="p">(</span><span class="n">signed_url</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">conn</span><span class="o">.</span><span class="n">read</span><span class="p">())</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">conn</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">response</span>
+</pre></div>
+
+
+<p>Now that I can make requests, I'll write a function that will search Yelp for businesses based on a search term and a location.</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">search</span><span class="p">(</span><span class="n">term</span><span class="p">,</span> <span class="n">location</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Search Yelp with a term and location &quot;&quot;&quot;</span>
+    <span class="n">url</span> <span class="o">=</span> <span class="s1">&#39;http://api.yelp.com/v2/search&#39;</span>
+    <span class="n">url_params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;term&#39;</span><span class="p">:</span> <span class="n">term</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">,</span> <span class="s1">&#39;+&#39;</span><span class="p">),</span>
+                  <span class="s1">&#39;location&#39;</span><span class="p">:</span> <span class="n">location</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">,</span> <span class="s1">&#39;+&#39;</span><span class="p">),</span>
+                  <span class="s1">&#39;limit&#39;</span><span class="p">:</span> <span class="n">limit</span><span class="p">}</span>
+    <span class="n">response</span> <span class="o">=</span> <span class="n">api_request</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">url_params</span><span class="p">)</span>
+    <span class="n">bizs</span> <span class="o">=</span> <span class="n">response</span><span class="p">[</span><span class="s1">&#39;businesses&#39;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">bizs</span>
+</pre></div>
+
+
+<p>Let's look for sushi in San Francisco's Mission neighborhood because sometimes you've already had three burritos this week.</p>
+<div class="highlight"><pre><span class="kn">from</span> <span class="nn">pprint</span> <span class="kn">import</span> <span class="n">pprint</span>
+<span class="n">bizs</span> <span class="o">=</span> <span class="n">search</span><span class="p">(</span><span class="s1">&#39;sushi&#39;</span><span class="p">,</span> <span class="s1">&#39;Mission, San Francisco, CA&#39;</span><span class="p">)</span>
+<span class="c1"># Look at our results and the ratings</span>
+<span class="n">pprint</span><span class="p">([(</span><span class="n">biz</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">],</span> <span class="n">biz</span><span class="p">[</span><span class="s1">&#39;rating&#39;</span><span class="p">])</span> <span class="k">for</span> <span class="n">biz</span> <span class="ow">in</span> <span class="n">bizs</span><span class="p">])</span>
+</pre></div>
+
+
+<div class="highlight"><pre>[(u&#39;Kazan&#39;, 4.5),
+ (u&#39;Sugoi Sushi&#39;, 4.0),
+ (u&#39;Saru Sushi Bar&#39;, 4.5),
+ (u&#39;Live Sushi Bar&#39;, 4.0),
+ (u&#39;Pink Zebra&#39;, 4.5)]
+</pre></div>
+
+
+<p>Now that we can search Yelp for businesses, let's see what sort of data we can get. Below is a short function for requesting data from Yelp's business API.</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">get_business</span><span class="p">(</span><span class="n">biz_id</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Get business data from Yelp &quot;&quot;&quot;</span>
+    <span class="n">url</span> <span class="o">=</span> <span class="s1">&#39;http://api.yelp.com/v2/business/{}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">biz_id</span><span class="p">)</span>
+    <span class="n">response</span> <span class="o">=</span> <span class="n">api_request</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="bp">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">response</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">biz</span> <span class="o">=</span> <span class="n">get_business</span><span class="p">(</span><span class="n">bizs</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;id&#39;</span><span class="p">])</span>
+<span class="n">pprint</span><span class="p">(</span><span class="n">biz</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>{u&#39;categories&#39;: [[u&#39;Japanese&#39;, u&#39;japanese&#39;], [u&#39;Sushi Bars&#39;, u&#39;sushi&#39;]],
+ u&#39;display_phone&#39;: u&#39;+1-415-282-2001&#39;,
+ u&#39;id&#39;: u&#39;kazan-san-francisco&#39;,
+ u&#39;image_url&#39;: u&#39;http://s3-media3.fl.yelpcdn.com/bphoto/bnY1-1e0XdPz6zTrG5dacA/ms.jpg&#39;,
+ u&#39;is_claimed&#39;: False,
+ u&#39;is_closed&#39;: False,
+ u&#39;location&#39;: {u&#39;address&#39;: [u&#39;2809 24th St&#39;],
+               u&#39;city&#39;: u&#39;San Francisco&#39;,
+               u&#39;coordinate&#39;: {u&#39;latitude&#39;: 37.75264,
+                               u&#39;longitude&#39;: -122.408447},
+               u&#39;country_code&#39;: u&#39;US&#39;,
+               u&#39;cross_streets&#39;: u&#39;York St &amp; Bryant St&#39;,
+               u&#39;display_address&#39;: [u&#39;2809 24th St&#39;,
+                                    u&#39;Mission&#39;,
+                                    u&#39;San Francisco, CA 94110&#39;],
+               u&#39;geo_accuracy&#39;: 8.0,
+               u&#39;neighborhoods&#39;: [u&#39;Mission&#39;],
+               u&#39;postal_code&#39;: u&#39;94110&#39;,
+               u&#39;state_code&#39;: u&#39;CA&#39;},
+ u&#39;mobile_url&#39;: u&#39;http://m.yelp.com/biz/kazan-san-francisco&#39;,
+ u&#39;name&#39;: u&#39;Kazan&#39;,
+ u&#39;phone&#39;: u&#39;4152822001&#39;,
+ u&#39;rating&#39;: 4.5,
+ u&#39;rating_img_url&#39;: u&#39;http://s3-media2.fl.yelpcdn.com/assets/2/www/img/99493c12711e/ico/stars/v1/stars_4_half.png&#39;,
+ u&#39;rating_img_url_large&#39;: u&#39;http://s3-media4.fl.yelpcdn.com/assets/2/www/img/9f83790ff7f6/ico/stars/v1/stars_large_4_half.png&#39;,
+ u&#39;rating_img_url_small&#39;: u&#39;http://s3-media2.fl.yelpcdn.com/assets/2/www/img/a5221e66bc70/ico/stars/v1/stars_small_4_half.png&#39;,
+ u&#39;review_count&#39;: 75,
+ u&#39;reviews&#39;: [{u&#39;excerpt&#39;: u&quot;I order sushi whenever I go to a Japanese place, and this place has one that&#39;s my favorite.\nIt&#39;s a bit on the pricey side, but worth it. \nNevertheless, if...&quot;,
+               u&#39;id&#39;: u&#39;TPi5BnMUQvS63tkOCmgAVg&#39;,
+               u&#39;rating&#39;: 5,
+               u&#39;rating_image_large_url&#39;: u&#39;http://s3-media3.fl.yelpcdn.com/assets/2/www/img/22affc4e6c38/ico/stars/v1/stars_large_5.png&#39;,
+               u&#39;rating_image_small_url&#39;: u&#39;http://s3-media1.fl.yelpcdn.com/assets/2/www/img/c7623205d5cd/ico/stars/v1/stars_small_5.png&#39;,
+               u&#39;rating_image_url&#39;: u&#39;http://s3-media1.fl.yelpcdn.com/assets/2/www/img/f1def11e4e79/ico/stars/v1/stars_5.png&#39;,
+               u&#39;time_created&#39;: 1430335602,
+               u&#39;user&#39;: {u&#39;id&#39;: u&#39;y1ksi2_lqjAofyXPFz1gFQ&#39;,
+                         u&#39;image_url&#39;: u&#39;http://s3-media2.fl.yelpcdn.com/photo/nyQZqxsWi_x6GlV6ZBtSeg/ms.jpg&#39;,
+                         u&#39;name&#39;: u&#39;Petra M.&#39;}}],
+ u&#39;snippet_image_url&#39;: u&#39;http://s3-media2.fl.yelpcdn.com/photo/nyQZqxsWi_x6GlV6ZBtSeg/ms.jpg&#39;,
+ u&#39;snippet_text&#39;: u&quot;I order sushi whenever I go to a Japanese place, and this place has one that&#39;s my favorite.\nIt&#39;s a bit on the pricey side, but worth it. \nNevertheless, if...&quot;,
+ u&#39;url&#39;: u&#39;http://www.yelp.com/biz/kazan-san-francisco&#39;}
+</pre></div>
+
+
+<h2>Web scraping Yelp</h2>
+<p>Looking through the business data, we can see that we get only one review from the API request. However, I want a bunch of reviews to analyze, so we'll have to find some other way to get user ratings. The solution is to extract the ratings data from Yelp's website (called <a href="http://en.wikipedia.org/wiki/Web_scraping">scraping</a>). First, I'll retrieve the HTML data from a business' Yelp page. Then I can use <a href="http://www.crummy.com/software/BeautifulSoup/">BeautifulSoup</a> to search through the HTML to find user ratings and dates. Below, I'll create a function to search Yelp and get the ratings data.</p>
+<div class="highlight"><pre><span class="o">%</span><span class="n">matplotlib</span> <span class="n">inline</span>
+
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">date</span><span class="p">,</span> <span class="n">timedelta</span> <span class="k">as</span> <span class="n">td</span>
+
+<span class="kn">import</span> <span class="nn">bs4</span> <span class="c1"># BeautifulSoup 4</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="kn">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="kn">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">seaborn</span> <span class="kn">as</span> <span class="nn">sb</span>
+<span class="n">sb</span><span class="o">.</span><span class="n">set_context</span><span class="p">(</span><span class="s1">&#39;talk&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">sb</span><span class="o">.</span><span class="n">set_contextext</span><span class="p">(</span><span class="s1">&#39;notebook&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">scrape_data</span><span class="p">(</span><span class="n">biz</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Accepts a business entry from Yelp&#39;s API, scrapes rating data </span>
+<span class="sd">        from the business&#39; Yelp page &quot;&quot;&quot;</span>
+    <span class="n">stars</span><span class="p">,</span> <span class="n">dates</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="n">n_reviews</span> <span class="o">=</span> <span class="n">biz</span><span class="p">[</span><span class="s1">&#39;review_count&#39;</span><span class="p">]</span>
+    <span class="c1"># There are 40 reviews per page</span>
+    <span class="n">n_pages</span> <span class="o">=</span> <span class="n">n_reviews</span><span class="o">/</span><span class="mi">40</span> <span class="o">+</span> <span class="mi">1</span>
+    <span class="k">for</span> <span class="n">page_start</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_pages</span><span class="o">*</span><span class="mi">40</span><span class="p">,</span> <span class="mi">40</span><span class="p">):</span>
+        <span class="n">url</span> <span class="o">=</span> <span class="s1">&#39;http://www.yelp.com/biz/{}?start={}&amp;sort_by=date_desc&#39;</span><span class="o">.</span>\
+               <span class="n">format</span><span class="p">(</span><span class="n">biz</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">],</span> <span class="n">page_start</span><span class="p">)</span>
+        <span class="n">response</span> <span class="o">=</span> <span class="n">urllib2</span><span class="o">.</span><span class="n">urlopen</span><span class="p">(</span><span class="n">url</span><span class="p">)</span>
+
+        <span class="n">soup</span> <span class="o">=</span> <span class="n">bs4</span><span class="o">.</span><span class="n">BeautifulSoup</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">read</span><span class="p">())</span>
+        <span class="n">ratings</span> <span class="o">=</span> <span class="n">soup</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">class_</span><span class="o">=</span><span class="s1">&#39;feed&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">find_all</span><span class="p">(</span><span class="n">class_</span><span class="o">=</span><span class="s1">&#39;biz-rating&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">each</span> <span class="ow">in</span> <span class="n">ratings</span><span class="p">:</span>
+            <span class="c1"># Sometimes a rating doesn&#39;t have a date, but we need both</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">rating</span> <span class="o">=</span> <span class="n">each</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">class_</span><span class="o">=</span><span class="s1">&#39;star-img&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">][:</span><span class="mi">3</span><span class="p">]</span>
+                <span class="n">date</span> <span class="o">=</span> <span class="n">each</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">itemprop</span><span class="o">=</span><span class="s1">&#39;datePublished&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s1">&#39;content&#39;</span><span class="p">]</span>
+            <span class="k">except</span> <span class="ne">AttributeError</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">stars</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">rating</span><span class="p">))</span>
+            <span class="n">dates</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">date</span><span class="p">)</span>
+
+    <span class="c1"># Put the ratings and dates into a Pandas dataframe for analysis</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s1">&#39;date&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">date</span><span class="p">)</span> <span class="k">for</span> <span class="n">date</span> <span class="ow">in</span> <span class="n">dates</span><span class="p">],</span> 
+                         <span class="s1">&#39;ratings&#39;</span><span class="p">:</span> <span class="n">stars</span><span class="p">})</span>
+    <span class="n">by_day</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">&#39;date&#39;</span><span class="p">)[</span><span class="s1">&#39;ratings&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">agg</span><span class="p">({</span><span class="s1">&#39;means&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">,</span> 
+                                                  <span class="s1">&#39;stds&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">by_day</span>
+</pre></div>
+
+
+<p>My function calculates the average rating per day, and includes the standard deviation if there are more than one review in a day.</p>
+<div class="highlight"><pre><span class="n">data</span> <span class="o">=</span> <span class="n">scrape_data</span><span class="p">(</span><span class="n">bizs</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<span class="n">data</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+</pre></div>
+
+
+<div style="max-height:1000px;max-width:1500px;overflow:auto;">
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>stds</th>
+      <th>means</th>
+    </tr>
+    <tr>
+      <th>date</th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>2012-08-18</th>
+      <td>NaN</td>
+      <td>4.0</td>
+    </tr>
+    <tr>
+      <th>2012-08-24</th>
+      <td>NaN</td>
+      <td>4.0</td>
+    </tr>
+    <tr>
+      <th>2012-08-26</th>
+      <td>NaN</td>
+      <td>5.0</td>
+    </tr>
+    <tr>
+      <th>2012-09-02</th>
+      <td>0.707107</td>
+      <td>4.5</td>
+    </tr>
+    <tr>
+      <th>2012-09-06</th>
+      <td>NaN</td>
+      <td>5.0</td>
+    </tr>
+    <tr>
+      <th>2012-09-08</th>
+      <td>NaN</td>
+      <td>5.0</td>
+    </tr>
+    <tr>
+      <th>2012-09-11</th>
+      <td>NaN</td>
+      <td>4.0</td>
+    </tr>
+    <tr>
+      <th>2012-09-30</th>
+      <td>NaN</td>
+      <td>4.0</td>
+    </tr>
+    <tr>
+      <th>2012-10-04</th>
+      <td>NaN</td>
+      <td>5.0</td>
+    </tr>
+    <tr>
+      <th>2012-10-12</th>
+      <td>NaN</td>
+      <td>5.0</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>Now, let's look at the ratings over time.</p>
+<div class="highlight"><pre><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">3</span><span class="p">))</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;means&#39;</span><span class="p">],</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">5.1</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Rating&quot;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="n">xmax</span><span class="o">=</span><span class="n">date</span><span class="o">.</span><span class="n">today</span><span class="p">())</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">autofmt_xdate</span><span class="p">()</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">(</span><span class="n">pad</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/yelp_timeline_20_0.png" /></p>
+<p>Now that we have ratings data, we need to find a way to calculate the average rating over time. A good way to do this is with a Gaussian process. </p>
+<p>Typically we want to infer some model parameters from our data. To do this with a Bayesian model, we define prior distributions over the model parameters, then calculate the posterior distributions of the parameters given the data and the data likelihood. However, we can instead avoid parameters by using a Gaussian process which is a <strong><em>distribution over functions</em></strong>. That is, we can find a function that models our data by drawing from an infinite collection of functions without ever defining a functional form. Similar to the normal distribution, parametrized by mean <span class="math">\(\mu\)</span> and covariance <span class="math">\(\Sigma\)</span> parameters,</p>
+<div class="math">$$
+p(x) \sim N(\mu, \Sigma),
+$$</div>
+<p>a Gaussian process is parametrized by mean and covariance <em>functions</em></p>
+<div class="math">$$
+p(x) \sim \mathcal{GP}(m(x), k(x,x^{\prime})).
+$$</div>
+<p>Typically we don't care about the mean function (<span class="math">\(m(x) = 0\)</span>) and most of the business happens in the covariance function, often a squared exponential</p>
+<div class="math">$$
+k(x,x^{\prime}) = \theta_1\exp\left(-\frac{\theta_2}{2}(x-x^{\prime})^2\right)
+$$</div>
+<p>but it can be expanded with additional terms for linear effects, or effects on different scales, etc. </p>
+<p>To demonstrate the power of Gaussian process, I'll generate some synthetic data <span class="math">\(y = f(x)\)</span> with noise and use a Gaussian process to infer the true <span class="math">\(f(x)\)</span>.</p>
+<div class="highlight"><pre><span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">250</span><span class="p">)</span>
+<span class="n">y_true</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2</span><span class="o">*</span><span class="n">x</span> <span class="o">+</span> <span class="n">x</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="n">x</span><span class="p">)</span>
+<span class="n">y</span> <span class="o">=</span> <span class="n">y_true</span> <span class="o">+</span> <span class="mi">10</span><span class="o">*</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.collections.PathCollection at 0x110c8a750&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/yelp_timeline_22_1.png" /></p>
+<p>A robust implentation can be found in <a href="http://scikit-learn.org/stable/modules/gaussian_process.html">scikit-learn</a>. The defaults are a constant mean function and the double exponential covariance function. The parameter <code>theta0</code> controls the length scale of the double exponential, while <code>nugget</code> is used for regularization, smoothing the prediction.</p>
+<div class="highlight"><pre><span class="kn">from</span> <span class="nn">sklearn</span> <span class="kn">import</span> <span class="n">gaussian_process</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">gp</span> <span class="o">=</span> <span class="n">gaussian_process</span><span class="o">.</span><span class="n">GaussianProcess</span><span class="p">(</span><span class="n">thetaL</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span> <span class="n">theta0</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>
+                                      <span class="n">thetaU</span><span class="o">=</span><span class="mf">1e3</span><span class="p">,</span> <span class="n">nugget</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<span class="n">gp</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">x</span><span class="p">[:,</span><span class="bp">None</span><span class="p">],</span> <span class="n">y</span><span class="p">)</span>
+<span class="n">x_hat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">500</span><span class="p">)</span>
+<span class="n">y_hat</span><span class="p">,</span> <span class="n">MSE</span> <span class="o">=</span> <span class="n">gp</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">x_hat</span><span class="p">[:,</span> <span class="bp">None</span><span class="p">],</span> <span class="n">eval_MSE</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="n">sigma</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">MSE</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y_true</span><span class="p">,</span> <span class="s1">&#39;--k&#39;</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;True&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x_hat</span><span class="p">,</span> <span class="n">y_hat</span><span class="p">,</span> <span class="s1">&#39;-r&#39;</span><span class="p">,</span> <span class="n">lw</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Model&quot;</span><span class="p">)</span>
+<span class="c1"># 95% Confidence interval</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">fill_between</span><span class="p">(</span><span class="n">x_hat</span><span class="p">,</span> <span class="n">y_hat</span> <span class="o">-</span> <span class="mf">1.96</span><span class="o">*</span><span class="n">sigma</span><span class="p">,</span> <span class="n">y_hat</span> <span class="o">+</span> <span class="mf">1.96</span><span class="o">*</span><span class="n">sigma</span><span class="p">,</span> 
+                 <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;95%&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">loc</span><span class="o">=</span><span class="s1">&#39;upper right&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.legend.Legend at 0x110d5c850&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/yelp_timeline_25_1.png" /></p>
+<p>As you can see, we can recover the true function from the noisy data. We can use this to interpolate the rating of a business over time from user reviews. First, lets scrape the ratings data for each of the businesses we searched up earlier. Then, we can predict the user rating over time. </p>
+<div class="highlight"><pre><span class="n">ratings</span> <span class="o">=</span> <span class="p">{</span><span class="n">biz</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]:</span> <span class="n">scrape_data</span><span class="p">(</span><span class="n">biz</span><span class="p">)</span> <span class="k">for</span> <span class="n">biz</span> <span class="ow">in</span> <span class="n">bizs</span><span class="p">}</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">rating_prediction</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="o">**</span><span class="n">gp_kwargs</span><span class="p">):</span>
+    <span class="c1"># Add a column with the number of days since the earliest date </span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="k">lambda</span> <span class="n">row</span><span class="p">:</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">index</span> <span class="o">-</span> <span class="n">data</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">days</span><span class="p">)</span>
+
+    <span class="n">params</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;theta0&#39;</span><span class="p">:</span> <span class="mf">0.1</span><span class="p">,</span>
+              <span class="s1">&#39;nugget&#39;</span><span class="p">:</span> <span class="mf">0.01</span><span class="p">}</span>
+    <span class="n">params</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="o">**</span><span class="n">gp_kwargs</span><span class="p">)</span>
+    <span class="n">gp</span> <span class="o">=</span> <span class="n">gaussian_process</span><span class="o">.</span><span class="n">GaussianProcess</span><span class="p">(</span><span class="o">**</span><span class="n">params</span><span class="p">)</span>
+    <span class="n">gp</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">days</span><span class="o">.</span><span class="n">values</span><span class="p">[:,</span><span class="bp">None</span><span class="p">],</span> <span class="n">data</span><span class="o">.</span><span class="n">means</span><span class="p">)</span>
+
+    <span class="c1"># Predict the rating for all days </span>
+    <span class="n">xs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">days</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">data</span><span class="o">.</span><span class="n">days</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])[:,</span><span class="bp">None</span><span class="p">]</span>
+    <span class="n">dates</span> <span class="o">=</span> <span class="p">[</span><span class="n">data</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">td</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="n">i</span><span class="p">)</span> 
+             <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">((</span><span class="n">data</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">data</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">days</span><span class="p">)]</span>
+    <span class="n">gp_predict</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">gp</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">xs</span><span class="p">),</span> <span class="n">index</span><span class="o">=</span><span class="n">dates</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">gp_predict</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span><span class="mi">4</span><span class="p">))</span>
+<span class="c1"># Grab ratings from the last year</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">ratings</span><span class="p">[</span><span class="n">bizs</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s1">&#39;name&#39;</span><span class="p">]]</span><span class="o">.</span>\
+       <span class="n">ix</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">date</span><span class="o">.</span><span class="n">today</span><span class="p">()</span> <span class="o">-</span> <span class="n">td</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">365</span><span class="p">)):]</span>
+<span class="n">prediction</span> <span class="o">=</span> <span class="n">rating_prediction</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">theta0</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">nugget</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">means</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> 
+           <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Daily user rating&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">prediction</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">prediction</span><span class="o">.</span><span class="n">values</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Predicted rating&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_xlim</span><span class="p">(</span><span class="n">prediction</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="n">prediction</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="mf">5.1</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="n">prediction</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">30</span><span class="p">::</span><span class="mi">60</span><span class="p">])</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([</span><span class="n">d</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%B %Y&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">prediction</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">30</span><span class="p">::</span><span class="mi">60</span><span class="p">]],</span>
+                    <span class="n">rotation</span><span class="o">=</span><span class="mi">40</span><span class="p">,</span> <span class="n">ha</span><span class="o">=</span><span class="s1">&#39;right&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Rating&quot;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">loc</span><span class="o">=</span><span class="s1">&#39;lower left&#39;</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">(</span><span class="n">pad</span><span class="o">=</span><span class="mf">0.1</span><span class="p">)</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/yelp_timeline_29_0.png" /></p>
+<p>Now we can predict the rating over time for a bunch of businesses at once. This is similar to <a href="http://en.wikipedia.org/wiki/Sparkline">sparklines</a> in that we are seeing much more information compressed into a small area of screen space.</p>
+<div class="highlight"><pre><span class="n">rating_predictions</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">each</span> <span class="ow">in</span> <span class="n">ratings</span><span class="o">.</span><span class="n">itervalues</span><span class="p">():</span>
+    <span class="c1"># Choose date range here, for instance, from the last year</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">each</span><span class="o">.</span><span class="n">ix</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">date</span><span class="o">.</span><span class="n">today</span><span class="p">()</span> <span class="o">-</span> <span class="n">td</span><span class="p">(</span><span class="n">days</span><span class="o">=</span><span class="mi">365</span><span class="p">)):]</span>
+    <span class="n">prediction</span> <span class="o">=</span> <span class="n">rating_prediction</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">theta0</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">nugget</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">rating_predictions</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">prediction</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">plt</span><span class="o">.</span><span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;xtick.major.pad&#39;</span><span class="p">]</span><span class="o">=</span><span class="s1">&#39;2&#39;</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">nrows</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">rating_predictions</span><span class="p">),</span>
+                         <span class="n">sharex</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span><span class="mi">5</span><span class="p">))</span>
+<span class="k">for</span> <span class="n">each</span><span class="p">,</span> <span class="n">ax</span><span class="p">,</span> <span class="n">biz</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">rating_predictions</span><span class="p">,</span> <span class="n">axes</span><span class="p">,</span> <span class="n">bizs</span><span class="p">):</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">each</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">each</span><span class="o">.</span><span class="n">values</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;orange&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">5.</span><span class="p">)</span>
+    <span class="n">x_min</span><span class="p">,</span> <span class="n">x_max</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">get_xlim</span><span class="p">()</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x_max</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="n">biz</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">],</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">13</span><span class="p">,</span> <span class="n">ha</span><span class="o">=</span><span class="s1">&#39;right&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="n">x_max</span><span class="p">,</span> <span class="n">each</span><span class="o">.</span><span class="n">values</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="s1">&#39; {:.1f}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">each</span><span class="o">.</span><span class="n">values</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span>
+            <span class="n">color</span><span class="o">=</span><span class="s1">&#39;darkorange&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_yticklabels</span><span class="p">([</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">])</span>
+<span class="n">axes</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="n">each</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">30</span><span class="p">::</span><span class="mi">60</span><span class="p">])</span>
+<span class="n">axes</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([</span><span class="n">d</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%B %Y&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">each</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">30</span><span class="p">::</span><span class="mi">60</span><span class="p">]],</span>
+                         <span class="n">rotation</span><span class="o">=</span><span class="mi">40</span><span class="p">,</span> <span class="n">ha</span><span class="o">=</span><span class="s1">&#39;right&#39;</span><span class="p">)</span>
+
+<span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">(</span><span class="n">pad</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">h_pad</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">rect</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mf">0.9</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/yelp_timeline_32_0.png" /></p>
+<script type="text/javascript">if (!document.getElementById('mathjaxscript_pelican_#%@#$@#')) {
+    var align = "center",
+        indent = "0em",
+        linebreak = "false";
+
+    if (false) {
+        align = (screen.width < 768) ? "left" : align;
+        indent = (screen.width < 768) ? "0em" : indent;
+        linebreak = (screen.width < 768) ? 'true' : linebreak;
+    }
+
+    var mathjaxscript = document.createElement('script');
+    var location_protocol = (false) ? 'https' : document.location.protocol;
+    if (location_protocol !== 'http' && location_protocol !== 'https') location_protocol = 'https:';
+    mathjaxscript.id = 'mathjaxscript_pelican_#%@#$@#';
+    mathjaxscript.type = 'text/javascript';
+    mathjaxscript.src = location_protocol + '//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML';
+    mathjaxscript[(window.opera ? "innerHTML" : "text")] =
+        "MathJax.Hub.Config({" +
+        "    config: ['MMLorHTML.js']," +
+        "    TeX: { extensions: ['AMSmath.js','AMSsymbols.js','noErrors.js','noUndefined.js'], equationNumbers: { autoNumber: 'AMS' } }," +
+        "    jax: ['input/TeX','input/MathML','output/HTML-CSS']," +
+        "    extensions: ['tex2jax.js','mml2jax.js','MathMenu.js','MathZoom.js']," +
+        "    displayAlign: '"+ align +"'," +
+        "    displayIndent: '"+ indent +"'," +
+        "    showMathMenu: true," +
+        "    messageStyle: 'normal'," +
+        "    tex2jax: { " +
+        "        inlineMath: [ ['\\\\(','\\\\)'] ], " +
+        "        displayMath: [ ['$$','$$'] ]," +
+        "        processEscapes: true," +
+        "        preview: 'TeX'," +
+        "    }, " +
+        "    'HTML-CSS': { " +
+        "        styles: { '.MathJax_Display, .MathJax .mo, .MathJax .mi, .MathJax .mn': {color: 'inherit ! important'} }," +
+        "        linebreaks: { automatic: "+ linebreak +", width: '90% container' }," +
+        "    }, " +
+        "}); " +
+        "if ('default' !== 'default') {" +
+            "MathJax.Hub.Register.StartupHook('HTML-CSS Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax['HTML-CSS'].FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+            "MathJax.Hub.Register.StartupHook('SVG Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax.SVG.FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+        "}";
+    (document.body || document.getElementsByTagName('head')[0]).appendChild(mathjaxscript);
+}
+</script></div>
+    <footer>
+<p class="meta">
+  <span class="byline author vcard">
+    Posted by <span class="fn">
+        Mat Leonard
+    </span>
+  </span>
+<time datetime="2016-01-31T13:53:00-08:00" pubdate>Jan 31, 2016</time>  <span class="categories">
+    <a class='category' href='/category/misc.html'>misc</a>
+  </span>
+  <span class="categories">
+    <a class="category" href="/tag/data-science.html">Data Science</a>,    <a class="category" href="/tag/python.html">Python</a>  </span>
+</p><div class="sharing">
+</div>    </footer>
+  </article>
+
+</div>
+<aside class="sidebar">
+  <section>
+    <h1>Recent Posts</h1>
+    <ul id="recent_posts">
+      <li class="post">
+          <a href="/yelp-timelines.html">Yelp Rating Timelines</a>
+      </li>
+      <li class="post">
+          <a href="/men-have-journals-women-have-diaries.html">Men have journals, women have diaries</a>
+      </li>
+      <li class="post">
+          <a href="/p-values-statistical-testing.html">Hypothesis testing and the origin of p-values</a>
+      </li>
+      <li class="post">
+          <a href="/github-hosting-documentation.html">Hosting Sphinx documentation on GitHub</a>
+      </li>
+      <li class="post">
+          <a href="/body-fat-percentage.html">Predicting body fat percentage</a>
+      </li>
+    </ul>
+  </section>
+  <section>
+      
+    <h1>Categories</h1>
+    <ul id="recent_posts">
+        <li><a href="/category/misc.html">misc</a></li>
+    </ul>
+  </section>
+ 
+
+  <section>
+  <h1>Tags</h1>
+    <a href="/tag/documentation.html">Documentation</a>,    <a href="/tag/python.html">Python</a>,    <a href="/tag/data-science.html">Data Science</a>,    <a href="/tag/misc.html">Misc</a>,    <a href="/tag/sampyl.html">Sampyl</a>,    <a href="/tag/statistics.html">Statistics</a>  </section>
+
+
+
+</aside>    </div>
+  </div>
+  <footer role="contentinfo"><p>
+    Copyright &copy;  2016  Mat Leonard &mdash;
+  <span class="credit">Powered by <a href="http://getpelican.com">Pelican</a></span>
+</p></footer>
+  <script src="/theme/js/modernizr-2.0.js"></script>
+  <script src="/theme/js/ender.js"></script>
+  <script src="/theme/js/octopress.js" type="text/javascript"></script>
+</body>
+</html>

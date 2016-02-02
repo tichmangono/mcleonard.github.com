@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<!--[if IEMobile 7 ]><html class="no-js iem7"><![endif]-->
+<!--[if lt IE 9]><html class="no-js lte-ie8"><![endif]-->
+<!--[if (gt IE 8)|(gt IEMobile 7)|!(IEMobile)|!(IE)]><!--><html class="no-js" lang="en"><!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  <title>Hypothesis testing and the origin of p-values &mdash; Matatat.org</title>
+  <meta name="author" content="Mat Leonard">
+
+
+
+
+
+
+  <!-- http://t.co/dKP3o1e -->
+  <meta name="HandheldFriendly" content="True">
+  <meta name="MobileOptimized" content="320">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+
+    <link href="/favicon.png" rel="icon">
+
+  <link href="/theme/css/main.css" media="screen, projection"
+        rel="stylesheet" type="text/css">
+
+  <link href="//fonts.googleapis.com/css?family=PT+Serif:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+  <link href="//fonts.googleapis.com/css?family=PT+Sans:regular,italic,bold,bolditalic"
+        rel="stylesheet" type="text/css">
+</head>
+
+<body>
+  <header role="banner"><hgroup>
+  <h1><a href="/">Matatat.org</a></h1>
+</hgroup></header>
+  <nav role="navigation"><ul class="subscription" data-subscription="rss">
+</ul>
+
+
+<ul class="main-navigation">
+    <li><a href="/archives.html">Archives</a></li>
+      <li><a href="/pages/about.html">About</a></li>
+</ul></nav>
+  <div id="main">
+    <div id="content">
+<div>
+  <article class="hentry" role="article">
+<header>
+      <h1 class="entry-title">Hypothesis testing and the origin of p-values</h1>
+    <p class="meta">
+<time datetime="2016-01-31T13:50:00-08:00" pubdate>Jan 31, 2016</time>    </p>
+</header>
+
+  <div class="entry-content"><p>Everytime we present results in science, we must also address our uncertainty. This is true any time a measurement is presented, such as in election polling, which why you see polls that report "56% of likely voters prefer candidate A <em>with a margin of 4 points</em>." A result without a statement of the uncertainty is basically meaningless.</p>
+<p>There are two types of uncertainty we come across in experiments, systematic errors and random errors. A systematic error is uncertainty introduced by the experimental process. For instance, a measurement device could be miscalibrated, or there could be a <a href="http://newsfeed.time.com/2012/02/22/einstein-was-right-all-along-faster-than-light-neutrino-was-product-of-error/">loose cable</a> that results in faster than light neutrinos. You can also introduce systematic errors through the model you choose. Often, you won't be able to account for every factor affecting your measurements and this will introduce uncertainty in the results.</p>
+<p>Random errors are due to fluctuations in the measurement. The uncertainty from random errors can be reduced by repeating the experiment. This type of uncertainty can be quantified by statistical analysis, unlike systematic errors.</p>
+<p>Many experiments, especially in life sciences, report uncertainty using hypothesis testing. Hypothesis testing compares experimental results with the <em>null hypothesis</em> that the results don't exist. This is done because we know that due to random errors, we might see a large experimental result, even if no true effect exists. </p>
+<p>For instance, if you are testing a pharmaceutical drug, you typically have a control (placebo) group and a treatment group. You find that the drug has some effect - it lowers cholesterol in the treatment group, maybe - and then you ask, "What is the probability I would see this effect due to random fluctuations if there was actually no effect?" Here the null hypothesis is that the two groups have equal means, <span class="math">\(\mu_c = \mu_t\)</span>. The analysis of this question leads to a <em>p-value</em>, the probability you would see an equal or greater effect under the null hypothesis. When the p-value is below some critical value, typically <span class="math">\(p &lt; 0.05\)</span>, then the result is declared statistically significant and the null hypothesis is rejected. The p-value is at the heart of a massive controversy occuring in science currently, to the point where some journals are <a href="http://www.tandfonline.com/doi/pdf/10.1080/01973533.2015.1012991">banning hypothesis testing</a> completely.</p>
+<p>I will offer my opinions about p-values later, but for now, I want to discuss where the p-value comes from and how it is calculated. Partially I'm doing this because I've seen few places online that explain how it is calculated, mostly because it is somehow <a href="https://en.wikipedia.org/wiki/P-value#Calculation">too complicated</a>, which as you will see, is not true. These days, most statistical testing is done with software packages like R with methods that are basically black boxes. You put your data in, out comes a p-value, then you either get to publish your results or collect more data. Here, I will try to dig into that black box and reveal what is happening.</p>
+
+
+<div class="highlight"><pre><span class="o">%</span><span class="n">matplotlib</span> <span class="n">inline</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="kn">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="kn">as</span> <span class="nn">plt</span>
+<span class="kn">from</span> <span class="nn">scipy</span> <span class="kn">import</span> <span class="n">stats</span>
+<span class="kn">import</span> <span class="nn">seaborn</span> <span class="kn">as</span> <span class="nn">sb</span>
+
+<span class="n">sb</span><span class="o">.</span><span class="n">set_context</span><span class="p">(</span><span class="s1">&#39;notebook&#39;</span><span class="p">,</span> <span class="n">font_scale</span><span class="o">=</span><span class="mf">1.25</span><span class="p">)</span>
+</pre></div>
+
+
+<p>I'm going to start with the most common hypothesis test, the <em>t-test</em>. Here, as with most hypothesis tests, we calculate a test statistic, <span class="math">\(t\)</span>. Then, we compare <span class="math">\(t\)</span> with what we would get from the null hypothesis and calculate a p-value. First, let's see what <span class="math">\(t\)</span> statistics we should see under the null hypothesis. To do this, I'm going to simulate drawing samples from normal distributions with the same mean and calculate <span class="math">\(t\)</span> for the two samples.</p>
+<div class="highlight"><pre><span class="n">a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span><span class="o">+</span><span class="mi">2</span>
+<span class="n">b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span><span class="o">+</span><span class="mi">2</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="n">bins</span><span class="o">=</span><span class="mi">28</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">)</span>
+<span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">6</span><span class="p">),</span> <span class="n">bins</span><span class="o">=</span><span class="mi">28</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.6</span><span class="p">)</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_4_0.png" /></p>
+<p>The t-test assumes the data is normally distributed. Student's t-test assumes your samples have equal variance and equal sample size. There is a more general test that does not make those assumptions, Welch's t-test. To calculate Welch's t-statistic:</p>
+<div class="math">$$
+t = \frac{\overline{X}_1 - \overline{X}_2}{\sqrt{\frac{s^2_1}{N_1} + \frac{s^2_2}{N_2}}}
+$$</div>
+<p>where <span class="math">\(\overline{X}_i\)</span>, <span class="math">\(s^2_i\)</span>, and <span class="math">\(N_i\)</span> are the sample mean, sample variance, and sample size, respectively, for sample <span class="math">\(i\)</span>. We also need to calculate the effective degrees of freedom:</p>
+<div class="math">$$
+\nu = \frac{\left(\frac{s^2_1}{N_1} + \frac{s^2_2}{N_2}\right)^2}{\frac{s^4_1}{N^2_1 \nu_1} + \frac{s^4_2}{N^2_2 \nu_2}}
+$$</div>
+<p>where <span class="math">\(\nu_i = N_i - 1\)</span> is the degrees of freedom of sample <span class="math">\(i\)</span>.</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">welch_t</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Calculate the t statistic for two samples. &quot;&quot;&quot;</span>
+    <span class="n">diff</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span> <span class="o">-</span> <span class="n">b</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="n">var</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">ddof</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="n">a</span><span class="o">.</span><span class="n">size</span> <span class="o">+</span> <span class="n">b</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">ddof</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="n">b</span><span class="o">.</span><span class="n">size</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">diff</span><span class="o">/</span><span class="n">var</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">welch_df</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot; Calculate the effective degrees of freedom for two samples. &quot;&quot;&quot;</span>
+    <span class="n">s_a</span><span class="p">,</span> <span class="n">s_b</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">ddof</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">b</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">ddof</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">n_a</span><span class="p">,</span> <span class="n">n_b</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">b</span><span class="o">.</span><span class="n">size</span>
+    <span class="n">numer</span> <span class="o">=</span> <span class="p">(</span><span class="n">s_a</span><span class="o">/</span><span class="n">n_a</span> <span class="o">+</span> <span class="n">s_b</span><span class="o">/</span><span class="n">n_b</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span>
+    <span class="n">denom</span> <span class="o">=</span> <span class="p">(</span><span class="n">s_a</span><span class="o">/</span> <span class="n">n_a</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="o">/</span><span class="p">(</span><span class="n">n_a</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="n">s_b</span><span class="o">/</span> <span class="n">n_b</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="o">/</span><span class="p">(</span><span class="n">n_b</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">numer</span><span class="o">/</span><span class="n">denom</span>
+</pre></div>
+
+
+<p>Now, for the data I generated above:</p>
+<div class="highlight"><pre><span class="k">print</span><span class="p">(</span><span class="s2">&quot;t-statistic: {:.3f}, with degrees of freedom: {:.3f}&quot;</span><span class="o">.</span>\
+      <span class="n">format</span><span class="p">(</span><span class="n">welch_t</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">),</span> <span class="n">welch_df</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>t-statistic: 0.936, with degrees of freedom: 17.999
+</pre></div>
+
+
+<p>This result is for two samples drawn from the same distribution. I'm interested in the distribution of <span class="math">\(t\)</span> if I calculate <span class="math">\(t\)</span> for many samples from this distribution. This will give us a distribution for comparison with <span class="math">\(t\)</span> calculated from real data. I'm going to plot the distribution of <span class="math">\(t\)</span> for increasing number of simulations to give us a sense of what would happen if we could do this infinite times.</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">format_axes</span><span class="p">(</span><span class="n">axes</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">ax</span> <span class="ow">in</span> <span class="n">axes</span><span class="p">:</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.75</span><span class="p">)</span>
+        <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">&quot;t-statistic&quot;</span><span class="p">)</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+    <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;p(t)&quot;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">N</span> <span class="o">=</span> <span class="mi">10</span> <span class="c1"># Sample size</span>
+<span class="n">mu</span><span class="p">,</span> <span class="n">sig</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span> <span class="mf">1.5</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="mf">3.5</span><span class="p">),</span> <span class="n">ncols</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">sharey</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">ax</span><span class="p">,</span> <span class="n">M</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">axes</span><span class="p">,</span> <span class="p">[</span><span class="mi">100</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">10000</span><span class="p">]):</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">)</span><span class="o">*</span><span class="n">sig</span> <span class="o">+</span> <span class="n">mu</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">)</span><span class="o">*</span><span class="n">sig</span> <span class="o">+</span> <span class="n">mu</span>
+
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">welch_t</span><span class="p">(</span><span class="n">a_i</span><span class="p">,</span> <span class="n">b_i</span><span class="p">)</span> <span class="k">for</span> <span class="n">a_i</span><span class="p">,</span> <span class="n">b_i</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)])</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">ts</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">4</span><span class="p">,</span><span class="mi">4</span><span class="p">),</span> <span class="n">bins</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">normed</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Simulation&#39;</span><span class="p">)</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">welch_df</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="mi">0</span><span class="p">,:],</span> <span class="n">b</span><span class="p">[</span><span class="mi">0</span><span class="p">,:])</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">100</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">pdf</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">df</span><span class="p">),</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;t-distribution&#39;</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">&quot;M = {}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">M</span><span class="p">))</span>
+<span class="n">format_axes</span><span class="p">(</span><span class="n">axes</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_12_0.png" /></p>
+<p>As the number of simulations gets larger, the distribution of t-statistics becomes closer and closer to the <a href="https://en.wikipedia.org/wiki/Student%27s_t-distribution">t-distribution</a> with degrees of freedom calculated from the data. We can use the t-distribution as an approximation of this process, as if we had actually performed the simulation infinite times. Now lets look what happens if we increase the sample size.</p>
+<div class="highlight"><pre><span class="n">M</span> <span class="o">=</span> <span class="mi">10000</span> <span class="c1"># Simulations</span>
+<span class="n">mu</span><span class="p">,</span> <span class="n">sig</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span> <span class="mf">1.5</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span><span class="mf">3.5</span><span class="p">),</span> <span class="n">ncols</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">sharey</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">ax</span><span class="p">,</span> <span class="n">N</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">axes</span><span class="p">,</span> <span class="p">[</span><span class="mi">3</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">27</span><span class="p">]):</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">)</span><span class="o">*</span><span class="n">sig</span> <span class="o">+</span> <span class="n">mu</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">)</span><span class="o">*</span><span class="n">sig</span> <span class="o">+</span> <span class="n">mu</span>
+
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">welch_t</span><span class="p">(</span><span class="n">a_i</span><span class="p">,</span> <span class="n">b_i</span><span class="p">)</span> <span class="k">for</span> <span class="n">a_i</span><span class="p">,</span> <span class="n">b_i</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)])</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">ts</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">4</span><span class="p">,</span><span class="mi">4</span><span class="p">),</span> <span class="n">bins</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span> <span class="n">normed</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Simulation&#39;</span><span class="p">)</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">welch_df</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="mi">0</span><span class="p">,:],</span> <span class="n">b</span><span class="p">[</span><span class="mi">0</span><span class="p">,:])</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">100</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">pdf</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">df</span><span class="p">),</span> <span class="s1">&#39;r&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;T distribution&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">norm</span><span class="o">.</span><span class="n">pdf</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="s1">&#39;--k&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Normal distribution&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s2">&quot;N = {}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">N</span><span class="p">))</span>
+<span class="n">format_axes</span><span class="p">(</span><span class="n">axes</span><span class="p">)</span>
+<span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_14_0.png" /></p>
+<p>As the sample size increases, the t-distribution can be approximated by a normal distribution with zero mean and a variance of one. Now that we see where the t-distribution comes from and that for a large enough sample, it approaches the normal distribution, how is this used to calculate a p-value? Remember that this is the distribution of <span class="math">\(t\)</span> for two samples drawn from the same distribution, that is, for the null hypothesis that <span class="math">\(\mu_1 = \mu_2\)</span>. In a typical experiment, you will have samples from what you believe is two groups, the control group and the treatment group. I'll simulate some data and calculate <span class="math">\(t\)</span>, then go through how to calculate a p-value.</p>
+<div class="highlight"><pre><span class="n">control</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">*</span><span class="mf">1.5</span> <span class="o">+</span> <span class="mi">2</span>
+<span class="n">treatment</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">12</span><span class="p">)</span> <span class="o">+</span> <span class="mi">3</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span><span class="mi">3</span><span class="p">))</span>
+<span class="n">colors</span> <span class="o">=</span> <span class="n">sb</span><span class="o">.</span><span class="n">color_palette</span><span class="p">()</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">control</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">control</span><span class="p">)),</span> <span class="n">c</span><span class="o">=</span><span class="n">colors</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> 
+            <span class="n">marker</span><span class="o">=</span><span class="s1">&#39;|&#39;</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">400</span><span class="p">,</span> <span class="n">linewidths</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.9</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">treatment</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">treatment</span><span class="p">)),</span> <span class="n">color</span><span class="o">=</span><span class="n">colors</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="n">marker</span><span class="o">=</span><span class="s1">&#39;|&#39;</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">400</span><span class="p">,</span> <span class="n">linewidths</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.9</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_yticks</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">])</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_yticklabels</span><span class="p">([</span><span class="s1">&#39;control&#39;</span><span class="p">,</span> <span class="s1">&#39;treatment&#39;</span><span class="p">])</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Sample value&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.text.Text at 0x10b183cc0&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_17_1.png" /></p>
+<div class="highlight"><pre><span class="n">t</span> <span class="o">=</span> <span class="n">welch_t</span><span class="p">(</span><span class="n">treatment</span><span class="p">,</span> <span class="n">control</span><span class="p">)</span>
+<span class="n">df</span> <span class="o">=</span> <span class="n">welch_df</span><span class="p">(</span><span class="n">treatment</span><span class="p">,</span> <span class="n">control</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="k">print</span><span class="p">(</span><span class="s2">&quot;t-statistic: {:.3f},&quot;</span>
+      <span class="s2">&quot; with degrees of freedom: {:.3f}&quot;</span><span class="o">.</span>\
+      <span class="n">format</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">df</span><span class="p">))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>t-statistic: 1.702, with degrees of freedom: 9.953
+</pre></div>
+
+
+<p>The p-value is the probability we would see a value equal to or more extreme than <span class="math">\(t\)</span>, under the null hypothesis. This is equivalient to asking, "How likely are we to see our result, or a more extreme result, if there was no true effect?"</p>
+<p>We can find this probability using the t-distribution with degrees of freedom as calculated above. There are two different kinds of tests we do, two-tailed and one-tailed tests. Two-tailed tests are used when you want to know if the two samples are different, that is, if <span class="math">\(\mu_1 \neq \mu_2\)</span>, but you aren't concerned about the direction of the difference. One-tailed tests are used if you want to know if <span class="math">\(\mu_1 &gt; \mu_2\)</span> or <span class="math">\(\mu_1 &lt; \mu_2\)</span>. If we are doing a one-tailed test, then the p-value is simply equal to the area under the t-distribution less than <span class="math">\(t\)</span>, the shaded area in the figure below.</p>
+<div class="highlight"><pre><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">()</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">200</span><span class="p">)</span>
+<span class="n">t_dist</span> <span class="o">=</span> <span class="n">stats</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">pdf</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">df</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">t_dist</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;t-distribution&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">vlines</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">,</span> <span class="n">linestyles</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> 
+          <span class="n">label</span><span class="o">=</span><span class="s1">&#39;t-statistic = {:.3f}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">t</span><span class="p">))</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;pdf(t)&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;t&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.55</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">loc</span><span class="o">=</span><span class="mi">9</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">fill_between</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">t_dist</span><span class="p">,</span> <span class="n">where</span><span class="o">=</span><span class="p">(</span><span class="n">x</span> <span class="o">&gt;=</span> <span class="n">t</span><span class="p">),</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;grey&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.collections.PolyCollection at 0x10a1ad048&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_21_1.png" /></p>
+<p>The easiest way to calculate the shaded area is with the cumulative density function (cdf). The cdf at <span class="math">\(t\)</span> is equal to the area under the curve for all values less than <span class="math">\(t\)</span>.</p>
+<div class="highlight"><pre><span class="n">p</span> <span class="o">=</span> <span class="n">stats</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">cdf</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">df</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">stats</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">cdf</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">df</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">([</span><span class="n">t</span><span class="p">,</span> <span class="n">t</span><span class="p">],</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">p</span><span class="p">],</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;cdf(t)&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;t&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.text.Text at 0x10a1d6748&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_23_1.png" /></p>
+<div class="highlight"><pre><span class="n">p</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">stats</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">cdf</span><span class="p">(</span><span class="n">t</span><span class="p">,</span> <span class="n">df</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="s2">&quot;One tailed p: {:.4f}&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">p</span><span class="p">))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>One tailed p: 0.0598
+</pre></div>
+
+
+<p>In this case, there is a 5.98% probability we would see <span class="math">\(t\)</span> equal to or greater than what we saw from our data. We would not be able to reject the null hypothesis since <span class="math">\(p\)</span> is not less than 0.05. Basically, the probability that our result isn't due to a statistical fluctiation is not small enough that we can reject the possibility that the null hypothesis is true. The critical value is typically chosen at <span class="math">\(p &lt; 0.05\)</span>, I believe because this is roughly two standard deviations from zero.</p>
+<p>The two-tailed p-value is simply twice the one-tailed value, because we want the probability where <span class="math">\(t &lt; -\lvert\hat{t}\rvert\)</span> and <span class="math">\(t &gt; \lvert\hat{t}\rvert\)</span>, where <span class="math">\(\hat{t}\)</span> is the t-statistic calculated from our data. Also, we can take advantage of the symmetry of the t-distribution to calculate only one side. Now we can write a function that calculates the p-value for two samples.</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">p_value</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+    <span class="s2">&quot;Calculate two-sided t-test for two samples a and b.&quot;</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">welch_t</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">welch_df</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">stats</span><span class="o">.</span><span class="n">t</span><span class="o">.</span><span class="n">cdf</span><span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">t</span><span class="p">),</span> <span class="n">df</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">t</span><span class="p">,</span> <span class="mi">2</span><span class="o">*</span><span class="n">p</span>
+</pre></div>
+
+
+<p>Now I'm going to explore how the p-value depends on various things like sample size and effect size. Here I will take the effect size as the difference in means between two samples from normal distributions with variances of one. An effect size of 1 is the same size as the noise, while 0.2 is one-fifth the size of the noise.</p>
+<div class="highlight"><pre><span class="k">def</span> <span class="nf">simulate_experiment</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="n">effect</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">delta</span><span class="o">=</span><span class="bp">False</span><span class="p">):</span>
+    <span class="n">control</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">N</span><span class="p">)</span>
+    <span class="n">treatment</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">N</span><span class="p">)</span> <span class="o">+</span> <span class="n">effect</span>
+    <span class="n">t</span><span class="p">,</span> <span class="n">p</span> <span class="o">=</span> <span class="n">p_value</span><span class="p">(</span><span class="n">control</span><span class="p">,</span> <span class="n">treatment</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">delta</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">treatment</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span> <span class="o">-</span> <span class="n">control</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span> <span class="n">p</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">p</span>
+
+<span class="n">Ns</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="mi">300</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span> <span class="c1"># Sample sizes</span>
+<span class="n">M</span> <span class="o">=</span> <span class="mi">1000</span> <span class="c1"># Simulations</span>
+<span class="n">ps1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="nb">sum</span><span class="p">(</span><span class="n">simulate_experiment</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">M</span><span class="p">))</span><span class="o">/</span><span class="n">M</span>
+               <span class="k">for</span> <span class="n">N</span> <span class="ow">in</span> <span class="n">Ns</span><span class="p">])</span>
+<span class="n">ps2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="nb">sum</span><span class="p">(</span><span class="n">simulate_experiment</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">M</span><span class="p">))</span><span class="o">/</span><span class="n">M</span>
+               <span class="k">for</span> <span class="n">N</span> <span class="ow">in</span> <span class="n">Ns</span><span class="p">])</span>
+<span class="n">ps3</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="nb">sum</span><span class="p">(</span><span class="n">simulate_experiment</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">M</span><span class="p">))</span><span class="o">/</span><span class="n">M</span>
+               <span class="k">for</span> <span class="n">N</span> <span class="ow">in</span> <span class="n">Ns</span><span class="p">])</span>
+</pre></div>
+
+
+<div class="highlight"><pre><span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">Ns</span><span class="p">,</span> <span class="n">ps1</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Effect = 0.2&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">Ns</span><span class="p">,</span> <span class="n">ps2</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Effect = 0.5&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">Ns</span><span class="p">,</span> <span class="n">ps3</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Effect = 1&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">hlines</span><span class="p">(</span><span class="mf">0.05</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">300</span><span class="p">,</span> <span class="n">linestyles</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s2">&quot;Average p-value&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s2">&quot;Sample size&quot;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.legend.Legend at 0x10a176908&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_29_1.png" /></p>
+<p>What we see here is that the p-value is a function of the sample size. This means that regardless of effect size, if you have a large amount of data, you will get a significant p-value. It also means that if you don't have a significant p-value, an effect isn't rejected, you just can't see it through the noise.</p>
+<p>Now lets look at how the p-values depend on effect size. Here I'll simulate a bunch of experiments so we can see the distribution of p-values we get.</p>
+<div class="highlight"><pre><span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">12</span><span class="p">,</span><span class="mi">3</span><span class="p">),</span> <span class="n">ncols</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">sharey</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+<span class="n">effect_sizes</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.25</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">]</span>
+<span class="n">effects</span> <span class="o">=</span> <span class="p">[[</span><span class="n">simulate_experiment</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="n">effect</span><span class="o">=</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10000</span><span class="p">)]</span>
+           <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">effect_sizes</span><span class="p">]</span>
+<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">each</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">effects</span><span class="p">):</span>
+    <span class="n">ax</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">each</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">),</span> <span class="n">bins</span><span class="o">=</span><span class="mi">40</span><span class="p">,</span> <span class="n">normed</span><span class="o">=</span><span class="bp">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">vlines</span><span class="p">(</span><span class="mf">0.05</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">linestyles</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Effect = {}&#39;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">effect_sizes</span><span class="p">[</span><span class="n">i</span><span class="p">]))</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;p&#39;</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">set_ylim</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_31_0.png" /></p>
+<p>Here are the probabilities to get <span class="math">\(p &lt; 0.05\)</span> for each effect size.</p>
+<div class="highlight"><pre><span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">each</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">effects</span><span class="p">):</span>
+    <span class="k">print</span><span class="p">(</span><span class="s1">&#39;Effect = {}, P(p &lt; 0.05): {}&#39;</span><span class="o">.</span>\
+          <span class="n">format</span><span class="p">(</span><span class="n">effect_sizes</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">each</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">0.05</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()))</span>
+</pre></div>
+
+
+<div class="highlight"><pre>Effect = 0.1, P(p &lt; 0.05): 0.1087
+Effect = 0.25, P(p &lt; 0.05): 0.421
+Effect = 0.5, P(p &lt; 0.05): 0.9447
+</pre></div>
+
+
+<p>A funny thing can be seen from the second set of simulations with an effect of <span class="math">\(0.25\)</span>. If this same experiment were replicated in multiple labs in multiple locations, the chance that one particular experiment would find a statistically significant effect is about the same as getting heads from a coin flip.</p>
+<p>Next I want to explore what sort of effects sizes we can actually detect when the effect size is small, 0.1 in my example below. I'm also going to use a medium sample size of 100.</p>
+<div class="highlight"><pre><span class="n">N</span> <span class="o">=</span> <span class="mi">100</span> <span class="c1"># Sample size</span>
+<span class="n">M</span> <span class="o">=</span> <span class="mi">10000</span> <span class="c1"># Number of simulations</span>
+<span class="n">experiments</span> <span class="o">=</span> <span class="p">(</span><span class="n">simulate_experiment</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="n">effect</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">delta</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">M</span><span class="p">))</span>
+<span class="n">results</span> <span class="o">=</span> <span class="p">[</span><span class="n">each</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">each</span> <span class="ow">in</span> <span class="n">experiments</span> <span class="k">if</span> <span class="n">each</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mf">0.05</span><span class="p">]</span>
+</pre></div>
+
+
+<p>I'm going to plot a histogram of the effects of experiments in which the null hypothesis was rejected. I will also plot a line indicating the true effect, and some more lines indicating multiples of the true effect to aid in interpreting the data.</p>
+<div class="highlight"><pre><span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="nb">range</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="n">bins</span><span class="o">=</span><span class="mi">40</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;delta means&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">vlines</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">450</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;k&#39;</span><span class="p">,</span> <span class="n">linestyles</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">vlines</span><span class="p">([</span><span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">450</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;grey&#39;</span><span class="p">,</span> <span class="n">linestyles</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">)</span>
+</pre></div>
+
+
+<div class="highlight"><pre>&lt;matplotlib.collections.LineCollection at 0x113be5048&gt;
+</pre></div>
+
+
+<p><img alt="png" src="images/p_values_statistical_testing_37_1.png" /></p>
+<p>We see here that the magnitude of the effect is overestimated by a factor of 3 or 4 when the hypothesis is rejected. In fact, the hypothesis will be rejected only if the effect from our samples is overly large. What's even worse, there are cases where the discovered effect has the opposite sign of the true effect. <a href="http://andrewgelman.com/">Andrew Gelman</a> calls these errors type M (magnitude) and type S (sign) errors, and discusses them more in <a href="http://www.stat.columbia.edu/~gelman/research/published/PPS551642_REV2.pdf">this paper</a>.</p>
+<p>Finally, time to wrap this up and try to summarize the results, with a little editorializing on my part.</p>
+<p>For large effects, hypothesis testing is redundant, it is obvious the means are different. For large data, you are almost guaranteed to find some effect. For medium effects with medium data, getting a p-value less than 0.05 is basically a coin toss. For small effects, if you do reject the null hypothesis, you are likely overestimating the effect or have it in the wrong direction. Here, we aren't even getting into the <a href="https://xkcd.com/882/">multiple comparisons problems and how people interpret p-values</a>. I'm also not addressing how scientists abuse the p-value through <a href="http://www.nature.com/news/scientific-method-statistical-errors-1.14700">p-hacking</a>. </p>
+<p>I don't think that p-values should be done away with completely. The first thing that needs to be addressed is the godly number in science, 0.05. It's absurd that a p-value of 0.0500001 will make your research unpublishable, but 0.0499999 could send it to Nature. Too many times I've seen a scientist present an interesting result, then say "But the p-value is only 0.06..." followed by a sigh or groan. Also, when a p-value is reported as <span class="math">\(p &lt; 0.05\)</span>, is it 0.0499999? Or 0.011? Why not just report the number? Furthermore, negative results are many times just as interesting as positive results. What I'm getting at is that scientific work should be judged on the hypothesis, the methods, and how well the evidence supports the hypothesis, not if p is less than the magical number 0.05. Hypothesis testing can certainly be performed, but the p-value should be presented as part of the evidence, then the reader can decide to believe the result or not. </p>
+<p>I personally find it frustrating when critics don't offer alternatives, so here is my suggestion. My prefered solution is to focus on parameter estimation, particularly with Bayesian inference. Because of problems with p-values and the abuse hypothesis testing has seen, there seems to be a swing back to Bayesian statistics. I personally don't like "classical" frequentist methods, a large part of it is the difference in <a href="https://jakevdp.github.io/blog/2014/06/12/frequentism-and-bayesianism-3-confidence-credibility/">philosophy</a>: frequentist methods pretend you perform the experiment infinite times, while Bayesian methods use the one dataset you actually collected to calculate likely parameters of the model. To learn more about Bayesian methods, see <a href="http://jakevdp.github.io/blog/2014/03/11/frequentism-and-bayesianism-a-practical-intro/">this series</a> by Jake VanderPlas, and <a href="http://camdavidsonpilon.github.io/Probabilistic-Programming-and-Bayesian-Methods-for-Hackers/">this online textbook</a> about probabilistic programming.</p>
+<script type="text/javascript">if (!document.getElementById('mathjaxscript_pelican_#%@#$@#')) {
+    var align = "center",
+        indent = "0em",
+        linebreak = "false";
+
+    if (false) {
+        align = (screen.width < 768) ? "left" : align;
+        indent = (screen.width < 768) ? "0em" : indent;
+        linebreak = (screen.width < 768) ? 'true' : linebreak;
+    }
+
+    var mathjaxscript = document.createElement('script');
+    var location_protocol = (false) ? 'https' : document.location.protocol;
+    if (location_protocol !== 'http' && location_protocol !== 'https') location_protocol = 'https:';
+    mathjaxscript.id = 'mathjaxscript_pelican_#%@#$@#';
+    mathjaxscript.type = 'text/javascript';
+    mathjaxscript.src = location_protocol + '//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML';
+    mathjaxscript[(window.opera ? "innerHTML" : "text")] =
+        "MathJax.Hub.Config({" +
+        "    config: ['MMLorHTML.js']," +
+        "    TeX: { extensions: ['AMSmath.js','AMSsymbols.js','noErrors.js','noUndefined.js'], equationNumbers: { autoNumber: 'AMS' } }," +
+        "    jax: ['input/TeX','input/MathML','output/HTML-CSS']," +
+        "    extensions: ['tex2jax.js','mml2jax.js','MathMenu.js','MathZoom.js']," +
+        "    displayAlign: '"+ align +"'," +
+        "    displayIndent: '"+ indent +"'," +
+        "    showMathMenu: true," +
+        "    messageStyle: 'normal'," +
+        "    tex2jax: { " +
+        "        inlineMath: [ ['\\\\(','\\\\)'] ], " +
+        "        displayMath: [ ['$$','$$'] ]," +
+        "        processEscapes: true," +
+        "        preview: 'TeX'," +
+        "    }, " +
+        "    'HTML-CSS': { " +
+        "        styles: { '.MathJax_Display, .MathJax .mo, .MathJax .mi, .MathJax .mn': {color: 'inherit ! important'} }," +
+        "        linebreaks: { automatic: "+ linebreak +", width: '90% container' }," +
+        "    }, " +
+        "}); " +
+        "if ('default' !== 'default') {" +
+            "MathJax.Hub.Register.StartupHook('HTML-CSS Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax['HTML-CSS'].FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+            "MathJax.Hub.Register.StartupHook('SVG Jax Ready',function () {" +
+                "var VARIANT = MathJax.OutputJax.SVG.FONTDATA.VARIANT;" +
+                "VARIANT['normal'].fonts.unshift('MathJax_default');" +
+                "VARIANT['bold'].fonts.unshift('MathJax_default-bold');" +
+                "VARIANT['italic'].fonts.unshift('MathJax_default-italic');" +
+                "VARIANT['-tex-mathit'].fonts.unshift('MathJax_default-italic');" +
+            "});" +
+        "}";
+    (document.body || document.getElementsByTagName('head')[0]).appendChild(mathjaxscript);
+}
+</script></div>
+    <footer>
+<p class="meta">
+  <span class="byline author vcard">
+    Posted by <span class="fn">
+        Mat Leonard
+    </span>
+  </span>
+<time datetime="2016-01-31T13:50:00-08:00" pubdate>Jan 31, 2016</time>  <span class="categories">
+    <a class='category' href='/category/misc.html'>misc</a>
+  </span>
+  <span class="categories">
+    <a class="category" href="/tag/python.html">Python</a>,    <a class="category" href="/tag/statistics.html">Statistics</a>  </span>
+</p><div class="sharing">
+</div>    </footer>
+  </article>
+
+</div>
+<aside class="sidebar">
+  <section>
+    <h1>Recent Posts</h1>
+    <ul id="recent_posts">
+      <li class="post">
+          <a href="/yelp-timelines.html">Yelp Rating Timelines</a>
+      </li>
+      <li class="post">
+          <a href="/men-have-journals-women-have-diaries.html">Men have journals, women have diaries</a>
+      </li>
+      <li class="post">
+          <a href="/p-values-statistical-testing.html">Hypothesis testing and the origin of p-values</a>
+      </li>
+      <li class="post">
+          <a href="/github-hosting-documentation.html">Hosting Sphinx documentation on GitHub</a>
+      </li>
+      <li class="post">
+          <a href="/body-fat-percentage.html">Predicting body fat percentage</a>
+      </li>
+    </ul>
+  </section>
+  <section>
+      
+    <h1>Categories</h1>
+    <ul id="recent_posts">
+        <li><a href="/category/misc.html">misc</a></li>
+    </ul>
+  </section>
+ 
+
+  <section>
+  <h1>Tags</h1>
+    <a href="/tag/documentation.html">Documentation</a>,    <a href="/tag/python.html">Python</a>,    <a href="/tag/data-science.html">Data Science</a>,    <a href="/tag/misc.html">Misc</a>,    <a href="/tag/sampyl.html">Sampyl</a>,    <a href="/tag/statistics.html">Statistics</a>  </section>
+
+
+
+</aside>    </div>
+  </div>
+  <footer role="contentinfo"><p>
+    Copyright &copy;  2016  Mat Leonard &mdash;
+  <span class="credit">Powered by <a href="http://getpelican.com">Pelican</a></span>
+</p></footer>
+  <script src="/theme/js/modernizr-2.0.js"></script>
+  <script src="/theme/js/ender.js"></script>
+  <script src="/theme/js/octopress.js" type="text/javascript"></script>
+</body>
+</html>
